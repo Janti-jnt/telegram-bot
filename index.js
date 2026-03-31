@@ -8,46 +8,42 @@ const bot = new TelegramBot(token);
 const app = express();
 app.use(express.json());
 
-// 🔒 Hata logları (çok önemli)
 bot.on("error", console.log);
 bot.on("webhook_error", console.log);
+
+// kullanıcılar
+let users = {};
 
 // 🌍 metinler
 const texts = {
   tr: {
-    menu: (u)=>`🎮 MENU\n\n⭐ ${u.stars}\n🎮 ${u.tries}`,
     play: "🎮 Oyna",
     balance: "⭐ Bakiye",
-    lang: "🌍 Dil değiştir",
+    lang: "🌍 Dil",
     spinning: "🎰 Çark dönüyor...",
     win: (x)=>`🎉 +${x}⭐ Kazandın!`,
     lose: "😢 Kaybettin",
     chooseLang: "Dil seç:"
   },
   en: {
-    menu: (u)=>`🎮 MENU\n\n⭐ ${u.stars}\n🎮 ${u.tries}`,
     play: "🎮 Play",
     balance: "⭐ Balance",
-    lang: "🌍 Change language",
+    lang: "🌍 Language",
     spinning: "🎰 Spinning...",
     win: (x)=>`🎉 +${x}⭐ Won!`,
     lose: "😢 Lost",
     chooseLang: "Choose language:"
   },
   ru: {
-    menu: (u)=>`🎮 MENU\n\n⭐ ${u.stars}\n🎮 ${u.tries}`,
     play: "🎮 Играть",
     balance: "⭐ Баланс",
-    lang: "🌍 Сменить язык",
+    lang: "🌍 Язык",
     spinning: "🎰 Крутится...",
     win: (x)=>`🎉 +${x}⭐ выигрыш`,
     lose: "😢 Проигрыш",
     chooseLang: "Выберите язык:"
   }
 };
-
-// kullanıcılar
-let users = {};
 
 // dil menüsü
 function langMenu(){
@@ -62,11 +58,11 @@ function langMenu(){
   };
 }
 
-// ana menü
+// ANA MENÜ (YAZI YOK)
 function menu(u){
   const t = texts[u.lang];
   return {
-    text: t.menu(u),
+    text: "🎰",
     reply_markup:{
       inline_keyboard:[
         [{text:t.play,callback_data:"play"}],
@@ -79,37 +75,29 @@ function menu(u){
   };
 }
 
-// 🔗 webhook endpoint
+// webhook
 app.post(`/bot${token}`, (req,res)=>{
   bot.processUpdate(req.body);
   res.sendStatus(200);
 });
 
-// test endpoint
-app.get("/", (req,res)=>{
-  res.send("ok");
-});
+app.get("/", (req,res)=>res.send("ok"));
 
-// 🚀 server başlat
-app.listen(process.env.PORT || 3000, ()=>{
-  console.log("Server running...");
-});
+app.listen(process.env.PORT || 3000);
 
-// 🔥 webhook'u gecikmeli kur (kritik fix)
+// webhook gecikmeli
 setTimeout(()=>{
   bot.setWebHook(`${url}/bot${token}`);
-  console.log("Webhook set!");
-}, 1500);
+},1500);
 
-// /start
+// START
 bot.onText(/\/start/, (msg)=>{
   const id = msg.chat.id;
 
   if(!users[id]){
-    users[id] = {stars:20,tries:999,lang:null};
+    users[id] = {stars:20,lang:null};
   }
 
-  // ilk giriş → dil sor
   if(!users[id].lang){
     return bot.sendMessage(id,"🌍",langMenu());
   }
@@ -118,7 +106,7 @@ bot.onText(/\/start/, (msg)=>{
   bot.sendMessage(id,m.text,{reply_markup:m.reply_markup});
 });
 
-// butonlar
+// BUTONLAR
 bot.on("callback_query", async (q)=>{
   try{
     const id = q.message.chat.id;
@@ -130,7 +118,7 @@ bot.on("callback_query", async (q)=>{
     let u = users[id];
     if(!u) return;
 
-    // dil seçimi
+    // dil seç
     if(data.startsWith("lang_")){
       u.lang = data.split("_")[1];
 
@@ -152,7 +140,7 @@ bot.on("callback_query", async (q)=>{
       });
     }
 
-    // oyun 🎰
+    // 🎰 oyun
     if(data==="play"){
       const t = texts[u.lang];
 
@@ -175,7 +163,7 @@ bot.on("callback_query", async (q)=>{
       }
 
       return bot.editMessageText(
-        `${text}\n\n⭐ ${u.stars}`,
+        text,
         {
           chat_id:id,
           message_id:mid,
@@ -199,7 +187,7 @@ bot.on("callback_query", async (q)=>{
       });
     }
 
-    // bakiye
+    // ⭐ BAKİYE (ARTIK BURADA GÖSTERİYOR)
     if(data==="balance"){
       return bot.answerCallbackQuery(q.id,{
         text:`⭐ ${u.stars}`
@@ -207,6 +195,6 @@ bot.on("callback_query", async (q)=>{
     }
 
   }catch(e){
-    console.log("ERR:", e);
+    console.log(e);
   }
 });
