@@ -8,9 +8,9 @@ const bot = new TelegramBot(token);
 const app = express();
 app.use(express.json());
 
-bot.setWebHook(`${url}/bot${token}`);
-
-let users = {};
+// 🔒 Hata logları (çok önemli)
+bot.on("error", console.log);
+bot.on("webhook_error", console.log);
 
 // 🌍 metinler
 const texts = {
@@ -46,7 +46,10 @@ const texts = {
   }
 };
 
-// dil seçimi ekranı
+// kullanıcılar
+let users = {};
+
+// dil menüsü
 function langMenu(){
   return {
     reply_markup:{
@@ -76,13 +79,29 @@ function menu(u){
   };
 }
 
-// webhook
+// 🔗 webhook endpoint
 app.post(`/bot${token}`, (req,res)=>{
   bot.processUpdate(req.body);
   res.sendStatus(200);
 });
 
-// START
+// test endpoint
+app.get("/", (req,res)=>{
+  res.send("ok");
+});
+
+// 🚀 server başlat
+app.listen(process.env.PORT || 3000, ()=>{
+  console.log("Server running...");
+});
+
+// 🔥 webhook'u gecikmeli kur (kritik fix)
+setTimeout(()=>{
+  bot.setWebHook(`${url}/bot${token}`);
+  console.log("Webhook set!");
+}, 1500);
+
+// /start
 bot.onText(/\/start/, (msg)=>{
   const id = msg.chat.id;
 
@@ -99,95 +118,95 @@ bot.onText(/\/start/, (msg)=>{
   bot.sendMessage(id,m.text,{reply_markup:m.reply_markup});
 });
 
-// BUTTONS
+// butonlar
 bot.on("callback_query", async (q)=>{
-  const id = q.message.chat.id;
-  const mid = q.message.message_id;
-  const data = q.data;
+  try{
+    const id = q.message.chat.id;
+    const mid = q.message.message_id;
+    const data = q.data;
 
-  await bot.answerCallbackQuery(q.id);
+    await bot.answerCallbackQuery(q.id);
 
-  let u = users[id];
-  if(!u) return;
+    let u = users[id];
+    if(!u) return;
 
-  // dil seçimi
-  if(data.startsWith("lang_")){
-    u.lang = data.split("_")[1];
+    // dil seçimi
+    if(data.startsWith("lang_")){
+      u.lang = data.split("_")[1];
 
-    const m = menu(u);
+      const m = menu(u);
 
-    return bot.editMessageText(m.text,{
-      chat_id:id,
-      message_id:mid,
-      reply_markup:m.reply_markup
-    });
-  }
-
-  // dil değiştir
-  if(data==="change_lang"){
-    return bot.editMessageText(texts[u.lang].chooseLang,{
-      chat_id:id,
-      message_id:mid,
-      reply_markup:langMenu().reply_markup
-    });
-  }
-
-  // oyun
-  if(data==="play"){
-    const t = texts[u.lang];
-
-    // 🎰 animasyon
-    await bot.editMessageText(t.spinning,{
-      chat_id:id,
-      message_id:mid
-    });
-
-    await new Promise(r=>setTimeout(r,1500));
-
-    let r = Math.random();
-    let text = "";
-
-    if(r < 0.6){
-      text = t.lose;
-    }else{
-      let win = Math.floor(Math.random()*5)+1;
-      u.stars += win;
-      text = t.win(win);
-    }
-
-    return bot.editMessageText(
-      `${text}\n\n⭐ ${u.stars}`,
-      {
+      return bot.editMessageText(m.text,{
         chat_id:id,
         message_id:mid,
-        reply_markup:{
-          inline_keyboard:[
-            [{text:"🔙",callback_data:"menu"}]
-          ]
-        }
+        reply_markup:m.reply_markup
+      });
+    }
+
+    // dil değiştir
+    if(data==="change_lang"){
+      return bot.editMessageText(texts[u.lang].chooseLang,{
+        chat_id:id,
+        message_id:mid,
+        reply_markup:langMenu().reply_markup
+      });
+    }
+
+    // oyun 🎰
+    if(data==="play"){
+      const t = texts[u.lang];
+
+      await bot.editMessageText(t.spinning,{
+        chat_id:id,
+        message_id:mid
+      });
+
+      await new Promise(r=>setTimeout(r,1500));
+
+      let r = Math.random();
+      let text = "";
+
+      if(r < 0.6){
+        text = t.lose;
+      }else{
+        let win = Math.floor(Math.random()*5)+1;
+        u.stars += win;
+        text = t.win(win);
       }
-    );
-  }
 
-  // menu
-  if(data==="menu"){
-    const m = menu(u);
+      return bot.editMessageText(
+        `${text}\n\n⭐ ${u.stars}`,
+        {
+          chat_id:id,
+          message_id:mid,
+          reply_markup:{
+            inline_keyboard:[
+              [{text:"🔙",callback_data:"menu"}]
+            ]
+          }
+        }
+      );
+    }
 
-    return bot.editMessageText(m.text,{
-      chat_id:id,
-      message_id:mid,
-      reply_markup:m.reply_markup
-    });
-  }
+    // menü
+    if(data==="menu"){
+      const m = menu(u);
 
-  // balance
-  if(data==="balance"){
-    return bot.answerCallbackQuery(q.id,{
-      text:`⭐ ${u.stars}`
-    });
+      return bot.editMessageText(m.text,{
+        chat_id:id,
+        message_id:mid,
+        reply_markup:m.reply_markup
+      });
+    }
+
+    // bakiye
+    if(data==="balance"){
+      return bot.answerCallbackQuery(q.id,{
+        text:`⭐ ${u.stars}`
+      });
+    }
+
+  }catch(e){
+    console.log("ERR:", e);
   }
 });
-
-// server
-app.get("/",(req,res)=>res.send("ok"));
-app.listen(process.env.PORT || 3000);
