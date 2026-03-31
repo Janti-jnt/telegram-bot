@@ -11,7 +11,6 @@ app.use(express.json());
 bot.on("error", console.log);
 bot.on("webhook_error", console.log);
 
-// kullanıcılar
 let users = {};
 
 // 🌍 metinler
@@ -23,7 +22,8 @@ const texts = {
     spinning: "🎰 Çark dönüyor...",
     win: (x)=>`🎉 +${x}⭐ Kazandın!`,
     lose: "😢 Kaybettin",
-    chooseLang: "Dil seç:"
+    chooseLang: "Dil seç:",
+    balanceText: (u)=>`⭐ ${u.stars}\n🎮 ${u.tries}`
   },
   en: {
     play: "🎮 Play",
@@ -32,7 +32,8 @@ const texts = {
     spinning: "🎰 Spinning...",
     win: (x)=>`🎉 +${x}⭐ Won!`,
     lose: "😢 Lost",
-    chooseLang: "Choose language:"
+    chooseLang: "Choose language:",
+    balanceText: (u)=>`⭐ ${u.stars}\n🎮 ${u.tries}`
   },
   ru: {
     play: "🎮 Играть",
@@ -41,7 +42,8 @@ const texts = {
     spinning: "🎰 Крутится...",
     win: (x)=>`🎉 +${x}⭐ выигрыш`,
     lose: "😢 Проигрыш",
-    chooseLang: "Выберите язык:"
+    chooseLang: "Выберите язык:",
+    balanceText: (u)=>`⭐ ${u.stars}\n🎮 ${u.tries}`
   }
 };
 
@@ -58,7 +60,7 @@ function langMenu(){
   };
 }
 
-// ANA MENÜ (YAZI YOK)
+// ana menü (temiz)
 function menu(u){
   const t = texts[u.lang];
   return {
@@ -85,7 +87,7 @@ app.get("/", (req,res)=>res.send("ok"));
 
 app.listen(process.env.PORT || 3000);
 
-// webhook gecikmeli
+// webhook fix
 setTimeout(()=>{
   bot.setWebHook(`${url}/bot${token}`);
 },1500);
@@ -95,7 +97,7 @@ bot.onText(/\/start/, (msg)=>{
   const id = msg.chat.id;
 
   if(!users[id]){
-    users[id] = {stars:20,lang:null};
+    users[id] = {stars:20,tries:10,lang:null};
   }
 
   if(!users[id].lang){
@@ -106,7 +108,7 @@ bot.onText(/\/start/, (msg)=>{
   bot.sendMessage(id,m.text,{reply_markup:m.reply_markup});
 });
 
-// BUTONLAR
+// BUTTONS
 bot.on("callback_query", async (q)=>{
   try{
     const id = q.message.chat.id;
@@ -121,7 +123,6 @@ bot.on("callback_query", async (q)=>{
     // dil seç
     if(data.startsWith("lang_")){
       u.lang = data.split("_")[1];
-
       const m = menu(u);
 
       return bot.editMessageText(m.text,{
@@ -144,6 +145,20 @@ bot.on("callback_query", async (q)=>{
     if(data==="play"){
       const t = texts[u.lang];
 
+      if(u.tries <= 0){
+        return bot.editMessageText("❌ No tries",{
+          chat_id:id,
+          message_id:mid,
+          reply_markup:{
+            inline_keyboard:[
+              [{text:"🔙",callback_data:"menu"}]
+            ]
+          }
+        });
+      }
+
+      u.tries--;
+
       await bot.editMessageText(t.spinning,{
         chat_id:id,
         message_id:mid
@@ -163,7 +178,7 @@ bot.on("callback_query", async (q)=>{
       }
 
       return bot.editMessageText(
-        text,
+        `${text}\n\n⭐ ${u.stars}\n🎮 ${u.tries}`,
         {
           chat_id:id,
           message_id:mid,
@@ -176,7 +191,7 @@ bot.on("callback_query", async (q)=>{
       );
     }
 
-    // menü
+    // 🔙 menü
     if(data==="menu"){
       const m = menu(u);
 
@@ -187,11 +202,22 @@ bot.on("callback_query", async (q)=>{
       });
     }
 
-    // ⭐ BAKİYE (ARTIK BURADA GÖSTERİYOR)
+    // ⭐ BAKİYE (İSTEDİĞİN GİBİ)
     if(data==="balance"){
-      return bot.answerCallbackQuery(q.id,{
-        text:`⭐ ${u.stars}`
-      });
+      const t = texts[u.lang];
+
+      return bot.editMessageText(
+        t.balanceText(u),
+        {
+          chat_id:id,
+          message_id:mid,
+          reply_markup:{
+            inline_keyboard:[
+              [{text:"🔙",callback_data:"menu"}]
+            ]
+          }
+        }
+      );
     }
 
   }catch(e){
