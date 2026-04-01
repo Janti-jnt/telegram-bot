@@ -46,7 +46,7 @@ const texts = {
     spinning:"🎰 Çark dönüyor...",
     lose:"😢 Kaybettin",
     win:(x)=>`🎉 +${x}⭐`,
-    ask:"(25-10000)",
+    ask:"💰 Miktar gir (25-10000)",
     request:(id,a,d,t)=>`Talep #${id}\n${a}⭐\n${d} ${t}\n✅ Onaylandı`
   },
   en:{
@@ -63,7 +63,7 @@ const texts = {
     spinning:"🎰 Spinning...",
     lose:"😢 Lost",
     win:(x)=>`🎉 +${x}⭐`,
-    ask:"(25-10000)",
+    ask:"💰 Enter amount (25-10000)",
     request:(id,a,d,t)=>`Request #${id}\n${a}⭐\n${d} ${t}\n✅ Approved`
   },
   ru:{
@@ -80,12 +80,12 @@ const texts = {
     spinning:"🎰 Крутится...",
     lose:"😢 Проигрыш",
     win:(x)=>`🎉 +${x}⭐`,
-    ask:"(25-10000)",
+    ask:"💰 Введите сумму (25-10000)",
     request:(id,a,d,t)=>`Заявка #${id}\n${a}⭐\n${d} ${t}\n✅ Одобрено`
   }
 };
 
-// MENU (3'LÜ GRID)
+// MENU (3x3 GRID)
 function menu(u){
   const t = texts[u.lang];
   return {
@@ -135,11 +135,29 @@ bot.onText(/\/start/, async (msg)=>{
   }
 
   if(!u.lang){
-    return bot.sendMessage(id,"🌍",langMenu());
+    return bot.sendMessage(id,"🌍 Dil seç / Choose / Выбери",langMenu());
   }
 
   const m = menu(u);
   bot.sendMessage(id,m.text,{reply_markup:m.reply_markup});
+});
+
+// TEXT INPUT (BUY)
+bot.on("message", async (msg)=>{
+  const id = msg.chat.id;
+
+  let u = await getUser(id);
+  if(!u || !u.waiting) return;
+
+  let n = parseInt(msg.text);
+  if(n>=25 && n<=10000){
+    u.stars+=n;
+    u.waiting=false;
+    await saveUser(id,u);
+
+    const m = menu(u);
+    bot.sendMessage(id,`✅ +${n}⭐`,{reply_markup:m.reply_markup});
+  }
 });
 
 // BUTTONS
@@ -187,7 +205,6 @@ bot.on("callback_query", async (q)=>{
     }
 
     u.stars--;
-
     await bot.editMessageText(t.spinning,{chat_id:id,message_id:mid});
     await new Promise(r=>setTimeout(r,1000));
 
@@ -218,6 +235,35 @@ bot.on("callback_query", async (q)=>{
     });
   }
 
+  // BUY
+  if(data==="buy"){
+    u.waiting = true;
+    await saveUser(id,u);
+
+    return bot.editMessageText(t.ask,{
+      chat_id:id,
+      message_id:mid,
+      reply_markup:{inline_keyboard:[[{text:"🔙",callback_data:"menu"}]]}
+    });
+  }
+
+  // REF
+  if(data==="ref"){
+    const link = `https://t.me/${process.env.BOT_USERNAME}?start=${id}`;
+
+    return bot.editMessageText(
+`${t.ref}
+
+${link}
+
+👥 ${u.refs}`,
+    {
+      chat_id:id,
+      message_id:mid,
+      reply_markup:{inline_keyboard:[[{text:"🔙",callback_data:"menu"}]]}
+    });
+  }
+
   // WITHDRAW MENU
   if(data==="withdraw"){
     return bot.editMessageText(t.withdrawMenu,{
@@ -234,7 +280,7 @@ bot.on("callback_query", async (q)=>{
     });
   }
 
-  // REQUEST
+  // CREATE REQUEST
   if(data.startsWith("w_")){
     const amount=parseInt(data.split("_")[1]);
 
@@ -265,7 +311,7 @@ bot.on("callback_query", async (q)=>{
     );
 
     bot.sendMessage(ADMIN_ID,
-`🔥 NEW WITHDRAW
+`🔥 WITHDRAW
 #${idReq}
 @${q.from.username || "no_username"}
 ${amount}⭐
