@@ -265,7 +265,7 @@ bot.on("callback_query", async (q)=>{
     });
   }
 
-  // ✅ WITHDRAW WORKING
+  // 🔥 WITHDRAW + ADMIN BİLDİRİM
   if(data.startsWith("w_")){
     let amount = parseInt(data.split("_")[1]);
 
@@ -281,6 +281,12 @@ bot.on("callback_query", async (q)=>{
     let list = await redis.get(`req_${id}`) || [];
     list.push({id:reqId,amount});
     await redis.set(`req_${id}`,list);
+
+    // 🔔 ADMIN BİLDİRİM
+    await bot.sendMessage(
+      ADMIN_ID,
+      `💸 NEW WITHDRAW\n\n#${reqId}\n👤 @${q.from.username || "no_username"}\n🆔 ${id}\n⭐ ${amount}`
+    );
 
     return bot.editMessageText(
       `#${reqId}\n⭐ ${amount}\n${t.waiting}`,
