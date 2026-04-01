@@ -13,8 +13,17 @@ const redis = new Redis({
 
 // USER
 async function getUser(id){
-  return await redis.get(`user:${id}`);
+  let u = await redis.get(`user:${id}`);
+  if(!u) return null;
+
+  // 🔥 eksik alanları tamamla (ÇOK ÖNEMLİ)
+  if(u.refs === undefined) u.refs = 0;
+  if(!u.lang) u.lang = null;
+  if(!u.waiting) u.waiting = false;
+
+  return u;
 }
+
 async function saveUser(id,data){
   await redis.set(`user:${id}`, data);
 }
@@ -109,9 +118,13 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match)=>{
     // REF
     if(ref && ref != id){
       let refUser = await getUser(ref);
+
       if(refUser){
+        if(refUser.refs === undefined) refUser.refs = 0;
+
         refUser.stars += 1.5;
         refUser.refs += 1;
+
         await saveUser(ref,refUser);
       }
     }
@@ -125,126 +138,59 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match)=>{
   bot.sendMessage(id,m.text,{reply_markup:m.reply_markup});
 });
 
-// CUSTOM LOAD
-bot.on("message", async (msg)=>{
-  const id = msg.chat.id;
+// BUTTONS
+bot.on("callback_query", async (q)=>{
+  const id = q.message.chat.id;
+  const mid = q.message.message_id;
+  const data = q.data;
+
+  await bot.answerCallbackQuery(q.id);
 
   let u = await getUser(id);
-  if(!u || !u.waiting) return;
+  if(!u) return;
 
-  let n = parseInt(msg.text);
-
-  if(n >=25 && n<=10000){
-    u.stars += n;
-    u.waiting = false;
+  // 🔥 LANG SELECT FIX
+  if(data.startsWith("lang_")){
+    u.lang = data.split("_")[1];
     await saveUser(id,u);
 
     const m = menu(u);
-    return bot.sendMessage(id, `✅ +${n}⭐`, {
+    return bot.editMessageText(m.text,{
+      chat_id:id,
+      message_id:mid,
       reply_markup:m.reply_markup
     });
   }
-});
 
-// BUTTONS
-bot.on("callback_query", async (q)=>{
-  try{
-    const id = q.message.chat.id;
-    const mid = q.message.message_id;
-    const data = q.data;
+  const t = texts[u.lang];
 
-    await bot.answerCallbackQuery(q.id);
+  if(data==="lang"){
+    return bot.editMessageText("🌍",{
+      chat_id:id,
+      message_id:mid,
+      reply_markup:langMenu().reply_markup
+    });
+  }
 
-    let u = await getUser(id);
-    if(!u) return;
-
-    if(data.startsWith("lang_")){
-      u.lang = data.split("_")[1];
-      await saveUser(id,u);
-
-      const m = menu(u);
-      return bot.editMessageText(m.text,{
-        chat_id:id,
-        message_id:mid,
-        reply_markup:m.reply_markup
-      });
-    }
-
-    const t = texts[u.lang];
-
-    if(data==="play"){
-      if(u.stars<=0){
-        return bot.editMessageText(t.noMoney,{
-          chat_id:id,
-          message_id:mid,
-          reply_markup:{inline_keyboard:[[{text:"🔙",callback_data:"menu"}]]}
-        });
+  if(data==="balance"){
+    return bot.editMessageText(`⭐ ${u.stars}\n👥 ${u.refs}`,{
+      chat_id:id,
+      message_id:mid,
+      reply_markup:{
+        inline_keyboard:[
+          [{text:"🔙",callback_data:"menu"}]
+        ]
       }
+    });
+  }
 
-      u.stars--;
-
-      await bot.editMessageText(t.spinning,{
-        chat_id:id,
-        message_id:mid
-      });
-
-      await new Promise(r=>setTimeout(r,1000));
-
-      let text;
-      if(Math.random()<0.6){
-        text=t.lose;
-      }else{
-        let w=Math.floor(Math.random()*5)+1;
-        u.stars+=w;
-        text=t.win(w);
-      }
-
-      await saveUser(id,u);
-
-      return bot.editMessageText(`${text}\n\n⭐ ${u.stars}`,{
-        chat_id:id,
-        message_id:mid,
-        reply_markup:{inline_keyboard:[[{text:"🔙",callback_data:"menu"}]]}
-      });
-    }
-
-    if(data==="balance"){
-      return bot.editMessageText(`⭐ ${u.stars}\n👥 ${u.refs}`,{
-        chat_id:id,
-        message_id:mid,
-        reply_markup:{inline_keyboard:[[{text:"🔙",callback_data:"menu"}]]}
-      });
-    }
-
-    if(data==="buy"){
-      u.waiting = true;
-      await saveUser(id,u);
-
-      return bot.editMessageText(t.ask,{
-        chat_id:id,
-        message_id:mid
-      });
-    }
-
-    if(data==="ref"){
-      return bot.editMessageText(t.refText(u,id),{
-        chat_id:id,
-        message_id:mid,
-        reply_markup:{inline_keyboard:[[{text:"🔙",callback_data:"menu"}]]}
-      });
-    }
-
-    if(data==="menu"){
-      const m = menu(u);
-      return bot.editMessageText(m.text,{
-        chat_id:id,
-        message_id:mid,
-        reply_markup:m.reply_markup
-      });
-    }
-
-  }catch(e){
-    console.log(e);
+  if(data==="menu"){
+    const m = menu(u);
+    return bot.editMessageText(m.text,{
+      chat_id:id,
+      message_id:mid,
+      reply_markup:m.reply_markup
+    });
   }
 });
 
