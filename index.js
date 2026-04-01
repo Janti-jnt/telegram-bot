@@ -15,7 +15,9 @@ const redis = new Redis({
 
 const SPIN_COST = 50;
 
+// 🎯 FIXED rewards (100% total)
 const rewards = [
+  {amount:0, chance:31.93},
   {amount:5, chance:26},
   {amount:10, chance:14},
   {amount:35, chance:10},
@@ -43,21 +45,24 @@ function backBtn(){
   return {inline_keyboard:[[{text:"🔙",callback_data:"menu"}]]};
 }
 
-// USER
+// 🔐 USER
 async function getUser(id){
   let u = await redis.get(`user:${id}`);
   if(!u) return null;
 
+  if(typeof u === "string") u = JSON.parse(u);
+
   if(typeof u.refs !== "number") u.refs = 0;
   if(typeof u.stars !== "number") u.stars = 0;
   if(typeof u.waiting !== "boolean") u.waiting = false;
+  if(typeof u.referred !== "boolean") u.referred = false;
   if(!u.lang) u.lang = null;
 
   return u;
 }
 
 async function saveUser(id,data){
-  await redis.set(`user:${id}`, data);
+  await redis.set(`user:${id}`, JSON.stringify(data));
 }
 
 // TEXTS
@@ -113,13 +118,14 @@ bot.onText(/\/start(?: (.+))?/, async (msg,match)=>{
   let u = await getUser(id);
 
   if(!u){
-    u = {stars:100,refs:0,lang:null};
+    u = {stars:100,refs:0,lang:null,referred:false};
     await saveUser(id,u);
 
+    // 🔐 anti abuse
     if(ref && ref!=id){
       let refUser = await getUser(ref);
       if(refUser){
-        refUser.stars += 1.5;
+        refUser.stars += 1;
         refUser.refs += 1;
         await saveUser(ref,refUser);
       }
@@ -133,30 +139,19 @@ bot.onText(/\/start(?: (.+))?/, async (msg,match)=>{
   bot.sendMessage(id,menu(u).text,{reply_markup:menu(u).reply_markup});
 });
 
-// BUY INPUT (FIXED)
+// BUY (ADMIN APPROVAL)
 bot.on("message", async (msg)=>{
   const id = msg.chat.id;
-
   let u = await getUser(id);
   if(!u || !u.waiting) return;
 
   let n = parseInt(msg.text);
 
   if(n>=25 && n<=10000){
-
-    u.stars += n;
     u.waiting = false;
     await saveUser(id,u);
 
-    const m = menu(u);
-
-    return bot.sendMessage(
-      id,
-      `✅ +${n}⭐`,
-      {
-        reply_markup: m.reply_markup
-      }
-    );
+    return bot.sendMessage(ADMIN_ID, `💰 BUY REQUEST\nUser: ${id}\nAmount: ${n}`);
   }
 });
 
@@ -173,76 +168,116 @@ bot.on("callback_query", async (q)=>{
 
   const t = texts[u.lang];
 
-  if(data==="play"){
-    if(u.stars < SPIN_COST){
-      return bot.editMessageText(t.noMoney,{chat_id:id,message_id:mid,reply_markup:backBtn()});
-    }
+  try{
 
-    u.stars -= SPIN_COST;
-    await bot.editMessageText(t.spinning,{chat_id:id,message_id:mid});
+    if(data==="play"){
 
-    await new Promise(r=>setTimeout(r,1000));
+      // ⏱ cooldown
+      if(u.lastSpin && Date.now() - u.lastSpin < 3000) return;
 
-    let win = spin();
-
-    if(win>0){
-      u.stars += win;
-      await saveUser(id,u);
-      return bot.editMessageText(`${t.win(win)}\n⭐ ${u.stars}`,{chat_id:id,message_id:mid,reply_markup:backBtn()});
-    } else {
-      await saveUser(id,u);
-      return bot.editMessageText(`${t.lose}\n⭐ ${u.stars}`,{chat_id:id,message_id:mid,reply_markup:backBtn()});
-    }
-  }
-
-  if(data==="balance"){
-    return bot.editMessageText(`⭐ ${u.stars}\n👥 ${u.refs}`,{chat_id:id,message_id:mid,reply_markup:backBtn()});
-  }
-
-  if(data==="buy"){
-    u.waiting=true;
-    await saveUser(id,u);
-    return bot.editMessageText(t.ask,{chat_id:id,message_id:mid,reply_markup:backBtn()});
-  }
-
-  if(data==="ref"){
-    const link = `https://t.me/${process.env.BOT_USERNAME}?start=${id}`;
-    return bot.editMessageText(`${link}\n👥 ${u.refs}`,{chat_id:id,message_id:mid,reply_markup:backBtn()});
-  }
-
-  if(data==="withdraw"){
-    return bot.editMessageText("💸",{
-      chat_id:id,
-      message_id:mid,
-      reply_markup:{
-        inline_keyboard:[
-          [15,25,50].map(a=>({text:`${a}`,callback_data:`w_${a}`})),
-          [100,350,500].map(a=>({text:`${a}`,callback_data:`w_${a}`})),
-          [650,1000].map(a=>({text:`${a}`,callback_data:`w_${a}`})),
-          [{text:"🔙",callback_data:"menu"}]
-        ]
+      if(u.stars < SPIN_COST){
+        return bot.editMessageText(t.noMoney,{chat_id:id,message_id:mid,reply_markup:backBtn()});
       }
-    });
-  }
 
-  if(data==="my"){
-    let list = await redis.get(`req_${id}`)||[];
-    let text = list.length?list.map(r=>`#${r.id} ${r.amount}`).join("\n"):"❌";
-    return bot.editMessageText(text,{chat_id:id,message_id:mid,reply_markup:backBtn()});
-  }
+      u.lastSpin = Date.now();
+      u.stars -= SPIN_COST;
 
-  if(data==="menu"){
-    return bot.editMessageText(menu(u).text,{chat_id:id,message_id:mid,reply_markup:menu(u).reply_markup});
-  }
+      await bot.editMessageText("🎰 🎰 🎰",{chat_id:id,message_id:mid});
 
-  if(data==="lang"){
-    return bot.editMessageText("🌍",{chat_id:id,message_id:mid,reply_markup:langMenu().reply_markup});
-  }
+      await new Promise(r=>setTimeout(r,1000));
 
-  if(data.startsWith("lang_")){
-    u.lang = data.split("_")[1];
-    await saveUser(id,u);
-    return bot.editMessageText(menu(u).text,{chat_id:id,message_id:mid,reply_markup:menu(u).reply_markup});
+      let win = spin();
+
+      if(win>0){
+        u.stars += win;
+        await saveUser(id,u);
+        return bot.editMessageText(`${t.win(win)}\n⭐ ${u.stars}`,{chat_id:id,message_id:mid,reply_markup:backBtn()});
+      } else {
+        await saveUser(id,u);
+        return bot.editMessageText(`${t.lose}\n⭐ ${u.stars}`,{chat_id:id,message_id:mid,reply_markup:backBtn()});
+      }
+    }
+
+    if(data==="balance"){
+      return bot.editMessageText(`⭐ ${u.stars}\n👥 ${u.refs}`,{chat_id:id,message_id:mid,reply_markup:backBtn()});
+    }
+
+    if(data==="buy"){
+      u.waiting=true;
+      await saveUser(id,u);
+      return bot.editMessageText(t.ask,{chat_id:id,message_id:mid,reply_markup:backBtn()});
+    }
+
+    if(data==="ref"){
+      const link = `https://t.me/${process.env.BOT_USERNAME}?start=${id}`;
+      return bot.editMessageText(`${link}\n👥 ${u.refs}`,{chat_id:id,message_id:mid,reply_markup:backBtn()});
+    }
+
+    // 💸 WITHDRAW FIXED
+    if(data==="withdraw"){
+      return bot.editMessageText("💸",{
+        chat_id:id,
+        message_id:mid,
+        reply_markup:{
+          inline_keyboard:[
+            [15,25,50].map(a=>({text:`${a}`,callback_data:`w_${a}`})),
+            [100,350,500].map(a=>({text:`${a}`,callback_data:`w_${a}`})),
+            [650,1000].map(a=>({text:`${a}`,callback_data:`w_${a}`})),
+            [{text:"🔙",callback_data:"menu"}]
+          ]
+        }
+      });
+    }
+
+    if(data.startsWith("w_")){
+      let amount = parseInt(data.split("_")[1]);
+
+      if(u.stars < amount){
+        return bot.editMessageText("❌",{chat_id:id,message_id:mid,reply_markup:backBtn()});
+      }
+
+      u.stars -= amount;
+
+      let req = {id:Date.now(),amount};
+
+      let list = await redis.get(`req_${id}`);
+      if(typeof list === "string") list = JSON.parse(list);
+      if(!list) list = [];
+
+      list.push(req);
+
+      await redis.set(`req_${id}`, JSON.stringify(list));
+      await saveUser(id,u);
+
+      return bot.editMessageText("✅",{chat_id:id,message_id:mid,reply_markup:backBtn()});
+    }
+
+    if(data==="my"){
+      let list = await redis.get(`req_${id}`);
+      if(typeof list === "string") list = JSON.parse(list);
+      if(!list) list = [];
+
+      let text = list.length ? list.map(r=>`#${r.id} ${r.amount}`).join("\n") : "❌";
+
+      return bot.editMessageText(text,{chat_id:id,message_id:mid,reply_markup:backBtn()});
+    }
+
+    if(data==="menu"){
+      return bot.editMessageText(menu(u).text,{chat_id:id,message_id:mid,reply_markup:menu(u).reply_markup});
+    }
+
+    if(data==="lang"){
+      return bot.editMessageText("🌍",{chat_id:id,message_id:mid,reply_markup:langMenu().reply_markup});
+    }
+
+    if(data.startsWith("lang_")){
+      u.lang = data.split("_")[1];
+      await saveUser(id,u);
+      return bot.editMessageText(menu(u).text,{chat_id:id,message_id:mid,reply_markup:menu(u).reply_markup});
+    }
+
+  } catch(e){
+    console.log(e);
   }
 
 });
