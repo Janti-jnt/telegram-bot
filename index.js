@@ -21,27 +21,12 @@ const BOT_USERNAME = process.env.BOT_USERNAME || '';
 const PORT = process.env.PORT || 3000;
 
 /*
-  Menü fotoğrafı için direkt image URL gerekir.
-  Senin verdiğin direkt görsel:
-  https://i.ibb.co/JSLjw7m/B8-D80-FDD-AB82-43-A0-8272-9461-CB1-D932-A.png
+  Menu photo:
+  Direct image URL is required.
+  Default is the image you provided.
 */
 const DEFAULT_MENU_PHOTO_URL = 'https://i.ibb.co/JSLjw7m/B8-D80-FDD-AB82-43-A0-8272-9461-CB1-D932-A.png';
 const MENU_PHOTO_URL = process.env.MENU_PHOTO_URL || DEFAULT_MENU_PHOTO_URL;
-
-const BLANK_PNG_BASE64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/w8AAgMBApQn6XcAAAAASUVORK5CYII=';
-
-const TMP_DIR = '/tmp';
-const HIDDEN_PHOTO_PATH = path.join(TMP_DIR, 'hidden-photo.png');
-
-try {
-  if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
-  if (!fs.existsSync(HIDDEN_PHOTO_PATH)) {
-    fs.writeFileSync(HIDDEN_PHOTO_PATH, Buffer.from(BLANK_PNG_BASE64, 'base64'));
-  }
-} catch (err) {
-  console.error('HIDDEN PHOTO INIT ERROR:', err);
-}
 
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
@@ -50,9 +35,7 @@ const redis = new Redis({
 
 const SPIN_COST = 50;
 
-/* =========================
-   REWARDS
-========================= */
+// 🎯 REWARDS
 const rewards = [
   { amount: 5, chance: 26 },
   { amount: 10, chance: 14 },
@@ -77,9 +60,6 @@ function spin() {
   return 0;
 }
 
-/* =========================
-   BUTTONS / UI HELPERS
-========================= */
 function backBtn() {
   return {
     inline_keyboard: [[{ text: '🔙', callback_data: 'menu' }]],
@@ -88,7 +68,6 @@ function backBtn() {
 
 function menuKeyboard(u) {
   const t = texts[u.lang] || texts.tr;
-
   return {
     inline_keyboard: [
       [
@@ -130,10 +109,20 @@ function withdrawKeyboard() {
   };
 }
 
+function nowDateTime() {
+  const now = new Date();
+  return {
+    date: now.toLocaleDateString(),
+    time: now.toLocaleTimeString(),
+  };
+}
+
 function displayName(user, id) {
   if (!user) return String(id);
 
-  if (user.username && user.username !== 'user') return `@${user.username}`;
+  if (user.username && user.username !== 'user') {
+    return `@${user.username}`;
+  }
 
   const first = user.first_name || '';
   const last = user.last_name || '';
@@ -144,17 +133,12 @@ function displayName(user, id) {
   return String(id);
 }
 
-function nowDateTime() {
-  const now = new Date();
-  return {
-    date: now.toLocaleDateString(),
-    time: now.toLocaleTimeString(),
-  };
+async function safeDelete(chatId, messageId) {
+  try {
+    await bot.deleteMessage(chatId, String(messageId));
+  } catch (e) {}
 }
 
-/* =========================
-   PHOTO SCREEN HELPERS
-========================= */
 async function sendMenuCard(chatId, u, prefix = '') {
   const t = texts[u.lang] || texts.tr;
   const caption = `${prefix}${t.menu}`;
@@ -172,65 +156,23 @@ async function sendMenuCard(chatId, u, prefix = '') {
   }
 }
 
-async function editMenuCard(chatId, messageId, u, captionText) {
-  try {
-    return await bot.editMessageMedia(
-      {
-        type: 'photo',
-        media: MENU_PHOTO_URL,
-        caption: captionText,
-      },
-      {
-        chat_id: chatId,
-        message_id: messageId,
-        reply_markup: menuKeyboard(u),
-      }
-    );
-  } catch (err) {
-    console.error('EDIT MENU PHOTO FAILED, fallback to text:', err?.message || err);
-    try {
-      return await bot.editMessageText(captionText, {
-        chat_id: chatId,
-        message_id: messageId,
-        reply_markup: menuKeyboard(u),
-      });
-    } catch (e) {
-      console.error('EDIT MENU TEXT FAILED:', e?.message || e);
-    }
-  }
+async function sendTextCard(chatId, text, replyMarkup) {
+  const options = {};
+  if (replyMarkup) options.reply_markup = replyMarkup;
+  return bot.sendMessage(chatId, text, options);
 }
 
-async function editPlainCard(chatId, messageId, text, replyMarkup) {
-  try {
-    return await bot.editMessageMedia(
-      {
-        type: 'photo',
-        media: HIDDEN_PHOTO_PATH,
-        caption: text,
-      },
-      {
-        chat_id: chatId,
-        message_id: messageId,
-        reply_markup: replyMarkup,
-      }
-    );
-  } catch (err) {
-    console.error('EDIT PLAIN PHOTO FAILED, fallback to text:', err?.message || err);
-    try {
-      return await bot.editMessageText(text, {
-        chat_id: chatId,
-        message_id: messageId,
-        reply_markup: replyMarkup,
-      });
-    } catch (e) {
-      console.error('EDIT PLAIN TEXT FAILED:', e?.message || e);
-    }
-  }
+async function replaceWithMenu(chatId, messageId, u, prefix = '') {
+  await safeDelete(chatId, messageId);
+  return sendMenuCard(chatId, u, prefix);
 }
 
-/* =========================
-   REDIS USER DATA
-========================= */
+async function replaceWithText(chatId, messageId, text, replyMarkup) {
+  await safeDelete(chatId, messageId);
+  return sendTextCard(chatId, text, replyMarkup);
+}
+
+// USER
 async function getUser(id) {
   let u = await redis.get(`user:${id}`);
   if (!u) return null;
@@ -249,16 +191,13 @@ async function getUser(id) {
 async function saveUser(id, data) {
   await redis.set(`user:${id}`, data);
 
-  // Upstash leaderboard
   await redis.zadd('leaderboard', {
     score: data.stars,
     member: id.toString(),
   });
 }
 
-/* =========================
-   REQUEST STORAGE
-========================= */
+// REQUESTS
 async function getRequests(id) {
   const r = await redis.get(`req_${id}`);
   return r || [];
@@ -270,9 +209,7 @@ async function saveRequest(id, data) {
   await redis.set(`req_${id}`, list);
 }
 
-/* =========================
-   TEXTS
-========================= */
+// TEXTS
 const texts = {
   tr: {
     menu: '🎰 Menü',
@@ -336,9 +273,7 @@ const texts = {
   },
 };
 
-/* =========================
-   START + REF BONUS
-========================= */
+// START + REF
 bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
   try {
     const id = msg.chat.id;
@@ -362,7 +297,6 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
 
       await saveUser(id, u);
 
-      // referral only for new users
       if (ref && ref !== String(id)) {
         const refUser = await getUser(ref);
         if (refUser) {
@@ -385,9 +319,7 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
   }
 });
 
-/* =========================
-   BUY INPUT
-========================= */
+// BUY INPUT
 bot.on('message', async (msg) => {
   try {
     const id = msg.chat.id;
@@ -405,17 +337,14 @@ bot.on('message', async (msg) => {
       u.waiting = false;
       await saveUser(id, u);
 
-      const prefix = `✅ +${n}⭐\n\n`;
-      return await sendMenuCard(id, u, prefix);
+      return await sendMenuCard(id, u, `✅ +${n}⭐\n\n`);
     }
   } catch (err) {
     console.error('MESSAGE INPUT ERROR:', err);
   }
 });
 
-/* =========================
-   CALLBACKS
-========================= */
+// CALLBACKS
 bot.on('callback_query', async (q) => {
   try {
     await bot.answerCallbackQuery(q.id);
@@ -434,13 +363,13 @@ bot.on('callback_query', async (q) => {
     // PLAY
     if (data === 'play') {
       if (u.stars < SPIN_COST) {
-        return editPlainCard(id, mid, t.noMoney, backBtn());
+        return replaceWithText(id, mid, t.noMoney, backBtn());
       }
 
       u.stars -= SPIN_COST;
       await saveUser(id, u);
 
-      await editPlainCard(id, mid, t.spinning, null);
+      const spinMsg = await replaceWithText(id, mid, t.spinning, null);
 
       await new Promise((r) => setTimeout(r, 1000));
 
@@ -449,17 +378,19 @@ bot.on('callback_query', async (q) => {
 
       await saveUser(id, u);
 
-      return editPlainCard(
-        id,
-        mid,
+      return bot.editMessageText(
         win > 0 ? `${t.win(win)}\n⭐ ${u.stars}` : `${t.lose}\n⭐ ${u.stars}`,
-        backBtn()
+        {
+          chat_id: id,
+          message_id: spinMsg.message_id,
+          reply_markup: backBtn(),
+        }
       );
     }
 
     // BALANCE
     if (data === 'balance') {
-      return editPlainCard(
+      return replaceWithText(
         id,
         mid,
         `⭐ ${u.stars}\n👥 ${u.refs}`,
@@ -472,7 +403,7 @@ bot.on('callback_query', async (q) => {
       u.waiting = true;
       await saveUser(id, u);
 
-      return editPlainCard(
+      return replaceWithText(
         id,
         mid,
         t.ask,
@@ -486,7 +417,7 @@ bot.on('callback_query', async (q) => {
         ? `https://t.me/${BOT_USERNAME}?start=${id}`
         : `https://t.me/?start=${id}`;
 
-      return editPlainCard(
+      return replaceWithText(
         id,
         mid,
         `${link}\n👥 ${u.refs}`,
@@ -496,7 +427,7 @@ bot.on('callback_query', async (q) => {
 
     // WITHDRAW MENU
     if (data === 'withdraw') {
-      return editPlainCard(
+      return replaceWithText(
         id,
         mid,
         t.withdrawMenu,
@@ -509,7 +440,7 @@ bot.on('callback_query', async (q) => {
       const amount = parseInt(data.split('_')[1], 10);
 
       if (!amount || u.stars < amount) {
-        return editPlainCard(id, mid, t.noMoney, backBtn());
+        return replaceWithText(id, mid, t.noMoney, backBtn());
       }
 
       u.stars -= amount;
@@ -540,7 +471,7 @@ bot.on('callback_query', async (q) => {
         }
       }
 
-      return editPlainCard(
+      return replaceWithText(
         id,
         mid,
         `#${reqId}\n${amount}⭐\n${date} ${time}\n⏳ ${t.requestPending}`,
@@ -553,7 +484,7 @@ bot.on('callback_query', async (q) => {
       const list = await getRequests(id);
 
       if (!list.length) {
-        return editPlainCard(id, mid, t.myEmpty, backBtn());
+        return replaceWithText(id, mid, t.myEmpty, backBtn());
       }
 
       let text = '';
@@ -562,7 +493,7 @@ bot.on('callback_query', async (q) => {
         text += `#${r.id} - ${r.amount}⭐ - ${status}\n`;
       }
 
-      return editPlainCard(id, mid, text.trim(), backBtn());
+      return replaceWithText(id, mid, text.trim(), backBtn());
     }
 
     // LEADERBOARD
@@ -570,7 +501,7 @@ bot.on('callback_query', async (q) => {
       const top = await redis.zrange('leaderboard', 0, 9, { rev: true });
 
       if (!top || !top.length) {
-        return editPlainCard(id, mid, t.topEmpty, backBtn());
+        return replaceWithText(id, mid, t.topEmpty, backBtn());
       }
 
       let text = `${t.top}\n\n`;
@@ -591,12 +522,12 @@ bot.on('callback_query', async (q) => {
         text += `${i + 1}. ${name} - ⭐ ${user?.stars || 0}\n`;
       }
 
-      return editPlainCard(id, mid, text.trim(), backBtn());
+      return replaceWithText(id, mid, text.trim(), backBtn());
     }
 
     // LANG MENU
     if (data === 'lang') {
-      return editPlainCard(
+      return replaceWithText(
         id,
         mid,
         '🌍',
@@ -608,30 +539,25 @@ bot.on('callback_query', async (q) => {
       u.lang = data.split('_')[1] || 'tr';
       await saveUser(id, u);
 
-      // back to menu photo
-      return editMenuCard(id, mid, u, texts[u.lang]?.menu || texts.tr.menu);
+      return replaceWithMenu(id, mid, u);
     }
 
     // MENU
     if (data === 'menu') {
-      return editMenuCard(id, mid, u, texts[u.lang]?.menu || texts.tr.menu);
+      return replaceWithMenu(id, mid, u);
     }
   } catch (err) {
     console.error('CALLBACK ERROR:', err);
   }
 });
 
-/* =========================
-   SERVER
-========================= */
+// SERVER
 app.post(`/bot${process.env.BOT_TOKEN}`, (req, res) => {
   bot.processUpdate(req.body);
   res.sendStatus(200);
 });
 
-app.get('/', (req, res) => {
-  res.send('OK');
-});
+app.get('/', (req, res) => res.send('OK'));
 
 app.listen(PORT, () => {
   console.log('Server running ' + PORT);
