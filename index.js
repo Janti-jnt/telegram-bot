@@ -62,9 +62,9 @@ async function saveUser(id,data){
 
 // TEXTS
 const texts = {
-  tr:{menu:"🎰 Menü",play:"🎮 Oyna (50⭐)",balance:"⭐ Bakiye",buy:"💰 Yükle",ref:"👥 Davet",withdraw:"💸 Çek",my:"📄 Talepler",lang:"🌍 Dil",noMoney:"❌ Yetersiz",spinning:"🎰 Dönüyor...",lose:"😢 Kaybettin",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"},
-  en:{menu:"🎰 Menu",play:"🎮 Play (50⭐)",balance:"⭐ Balance",buy:"💰 Deposit",ref:"👥 Invite",withdraw:"💸 Withdraw",my:"📄 Requests",lang:"🌍 Language",noMoney:"❌ Not enough",spinning:"🎰 Spinning...",lose:"😢 Lost",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"},
-  ru:{menu:"🎰 Меню",play:"🎮 Играть (50⭐)",balance:"⭐ Баланс",buy:"💰 Пополнить",ref:"👥 Пригласить",withdraw:"💸 Вывод",my:"📄 Заявки",lang:"🌍 Язык",noMoney:"❌ Недостаточно",spinning:"🎰 Крутится...",lose:"😢 Проигрыш",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"}
+  tr:{menu:"🎰 Menü",play:"🎮 Oyna (50⭐)",balance:"⭐ Bakiye",buy:"💰 Yükle",ref:"👥 Davet",withdraw:"💸 Çek",my:"📄 Talepler",lang:"🌍 Dil",noMoney:"❌ Yetersiz bakiye",spinning:"🎰 Çark dönüyor...",lose:"😢 Kaybettin",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"},
+  en:{menu:"🎰 Menu",play:"🎮 Play (50⭐)",balance:"⭐ Balance",buy:"💰 Deposit",ref:"👥 Invite",withdraw:"💸 Withdraw",my:"📄 Requests",lang:"🌍 Language",noMoney:"❌ Not enough balance",spinning:"🎰 Spinning...",lose:"😢 Lost",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"},
+  ru:{menu:"🎰 Меню",play:"🎮 Играть (50⭐)",balance:"⭐ Баланс",buy:"💰 Пополнить",ref:"👥 Пригласить",withdraw:"💸 Вывод",my:"📄 Заявки",lang:"🌍 Язык",noMoney:"❌ Недостаточно средств",spinning:"🎰 Крутится...",lose:"😢 Проигрыш",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"}
 };
 
 // MENU
@@ -133,19 +133,30 @@ bot.onText(/\/start(?: (.+))?/, async (msg,match)=>{
   bot.sendMessage(id,menu(u).text,{reply_markup:menu(u).reply_markup});
 });
 
-// BUY INPUT
+// BUY INPUT (FIXED)
 bot.on("message", async (msg)=>{
   const id = msg.chat.id;
+
   let u = await getUser(id);
   if(!u || !u.waiting) return;
 
   let n = parseInt(msg.text);
+
   if(n>=25 && n<=10000){
-    u.stars+=n;
-    u.waiting=false;
+
+    u.stars += n;
+    u.waiting = false;
     await saveUser(id,u);
 
-    bot.sendMessage(id,`✅ +${n}⭐`);
+    const m = menu(u);
+
+    return bot.sendMessage(
+      id,
+      `✅ +${n}⭐`,
+      {
+        reply_markup: m.reply_markup
+      }
+    );
   }
 });
 
