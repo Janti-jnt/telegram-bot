@@ -6,13 +6,12 @@ const bot = new TelegramBot(process.env.BOT_TOKEN);
 const app = express();
 app.use(express.json());
 
-// 🔥 REDIS
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
-// 👤 USER
+// USER
 async function getUser(id){
   return await redis.get(`user:${id}`);
 }
@@ -31,7 +30,8 @@ const texts = {
     spinning:"🎰 Çark dönüyor...",
     lose:"😢 Kaybettin",
     win:(x)=>`🎉 +${x}⭐ Kazandın!`,
-    ask:"💰 kaç yıldız yüklemek istiyorsun? (25-10000)"
+    ask:"💰 kaç yıldız yüklemek istiyorsun? (25-10000)",
+    noMoney:"❌ Yetersiz bakiye"
   },
   en: {
     menu:"🎰 Menu",
@@ -42,7 +42,8 @@ const texts = {
     spinning:"🎰 Spinning...",
     lose:"😢 Lost",
     win:(x)=>`🎉 +${x}⭐ Won!`,
-    ask:"💰 enter amount (25-10000)"
+    ask:"💰 enter amount (25-10000)",
+    noMoney:"❌ Not enough balance"
   },
   ru: {
     menu:"🎰 Меню",
@@ -53,15 +54,16 @@ const texts = {
     spinning:"🎰 Крутится...",
     lose:"😢 Проигрыш",
     win:(x)=>`🎉 +${x}⭐ выигрыш`,
-    ask:"💰 сколько звезд добавить? (25-10000)"
+    ask:"💰 сколько звезд добавить? (25-10000)",
+    noMoney:"❌ Недостаточно средств"
   }
 };
 
-// 🎛 MENU
+// MENU
 function menu(u){
   const t = texts[u.lang];
   return {
-    text:`${t.menu}\n\n⭐ ${u.stars}`,
+    text:`${t.menu}`,
     reply_markup:{
       inline_keyboard:[
         [{text:t.play,callback_data:"play"}],
@@ -73,7 +75,7 @@ function menu(u){
   };
 }
 
-// 🌍 LANG MENU
+// LANG MENU
 function langMenu(){
   return {
     reply_markup:{
@@ -86,7 +88,7 @@ function langMenu(){
   };
 }
 
-// 🌐 WEBHOOK
+// WEBHOOK
 app.post(`/bot${process.env.BOT_TOKEN}`, (req,res)=>{
   bot.processUpdate(req.body);
   res.sendStatus(200);
@@ -94,7 +96,7 @@ app.post(`/bot${process.env.BOT_TOKEN}`, (req,res)=>{
 app.get("/", (req,res)=>res.send("ok"));
 app.listen(process.env.PORT || 3000);
 
-// 🚀 START (FIXLİ)
+// START
 bot.onText(/\/start/, async (msg)=>{
   const id = msg.chat.id;
 
@@ -104,20 +106,15 @@ bot.onText(/\/start/, async (msg)=>{
     await saveUser(id,u);
   }
 
-  // dil yoksa sor
   if(!u.lang){
     return bot.sendMessage(id,"🌍 Dil seç:",langMenu());
   }
 
   const m = menu(u);
-
-  // 🔥 HER ZAMAN YENİ MESAJ
-  return bot.sendMessage(id, `♻️ Menü yenilendi\n\n${m.text}`, {
-    reply_markup:m.reply_markup
-  });
+  return bot.sendMessage(id, m.text, {reply_markup:m.reply_markup});
 });
 
-// ✍️ CUSTOM YÜKLEME
+// CUSTOM YÜKLEME
 bot.on("message", async (msg)=>{
   const id = msg.chat.id;
 
@@ -138,7 +135,7 @@ bot.on("message", async (msg)=>{
   }
 });
 
-// 🎮 BUTTONS
+// BUTTONS
 bot.on("callback_query", async (q)=>{
   try{
     const id = q.message.chat.id;
@@ -150,7 +147,7 @@ bot.on("callback_query", async (q)=>{
     let u = await getUser(id);
     if(!u) return;
 
-    // 🌍 LANG SELECT
+    // LANG SELECT
     if(data.startsWith("lang_")){
       u.lang = data.split("_")[1] || "tr";
       await saveUser(id,u);
@@ -173,12 +170,17 @@ bot.on("callback_query", async (q)=>{
       });
     }
 
-    // 🎰 OYUN
+    // 🎰 PLAY
     if(data==="play"){
       if(u.stars<=0){
-        return bot.editMessageText("❌",{
+        return bot.editMessageText(t.noMoney,{
           chat_id:id,
-          message_id:mid
+          message_id:mid,
+          reply_markup:{
+            inline_keyboard:[
+              [{text:"🔙",callback_data:"menu"}]
+            ]
+          }
         });
       }
 
@@ -213,7 +215,7 @@ bot.on("callback_query", async (q)=>{
       });
     }
 
-    // 🔙 MENU
+    // MENU
     if(data==="menu"){
       const m = menu(u);
       return bot.editMessageText(m.text,{
@@ -223,7 +225,7 @@ bot.on("callback_query", async (q)=>{
       });
     }
 
-    // ⭐ BALANCE
+    // BALANCE
     if(data==="balance"){
       return bot.editMessageText(`⭐ ${u.stars}`,{
         chat_id:id,
@@ -236,7 +238,7 @@ bot.on("callback_query", async (q)=>{
       });
     }
 
-    // 💰 YÜKLE
+    // BUY
     if(data==="buy"){
       u.waiting = true;
       await saveUser(id,u);
