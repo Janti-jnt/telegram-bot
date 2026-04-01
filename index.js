@@ -58,8 +58,11 @@ async function getUser(id){
 async function saveUser(id,data){
   await redis.set(`user:${id}`, data);
 
-  // ✅ leaderboard FIX
-  await redis.zadd("leaderboard", data.stars, id.toString());
+  // ✅ UPSTASH DOĞRU leaderboard
+  await redis.zadd("leaderboard", {
+    score: data.stars,
+    member: id.toString()
+  });
 }
 
 // TEXTS
@@ -164,13 +167,13 @@ bot.onText(/\/start/, async (msg)=>{
   }
 
   if(!u.lang){
-    return bot.sendMessage(id,"🌍",langMenu());
+    return bot.sendMessage(id,"🌍 Dil seç / Choose language",langMenu());
   }
 
   bot.sendMessage(id,menu(u).text,{reply_markup:menu(u).reply_markup});
 });
 
-// BUY
+// BUY INPUT
 bot.on("message", async (msg)=>{
   const id = msg.chat.id;
   let u = await getUser(id);
@@ -202,7 +205,7 @@ bot.on("callback_query", async (q)=>{
 
   const t = texts[u.lang];
 
-  // PLAY FIX
+  // PLAY
   if(data==="play"){
     if(u.stars < SPIN_COST){
       return bot.editMessageText(t.noMoney,{
@@ -220,7 +223,7 @@ bot.on("callback_query", async (q)=>{
       message_id:mid
     });
 
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise(r => setTimeout(r, 1000));
 
     let win = spin();
 
@@ -243,24 +246,32 @@ bot.on("callback_query", async (q)=>{
   // BALANCE
   if(data==="balance"){
     return bot.editMessageText(`⭐ ${u.stars}\n👥 ${u.refs}`,{
-      chat_id:id,message_id:mid,reply_markup:backBtn()
+      chat_id:id,
+      message_id:mid,
+      reply_markup:backBtn()
     });
   }
 
   // BUY
   if(data==="buy"){
-    u.waiting=true;
+    u.waiting = true;
     await saveUser(id,u);
+
     return bot.editMessageText(t.ask,{
-      chat_id:id,message_id:mid,reply_markup:backBtn()
+      chat_id:id,
+      message_id:mid,
+      reply_markup:backBtn()
     });
   }
 
   // REF
   if(data==="ref"){
     const link = `https://t.me/${process.env.BOT_USERNAME}?start=${id}`;
+
     return bot.editMessageText(`${link}\n👥 ${u.refs}`,{
-      chat_id:id,message_id:mid,reply_markup:backBtn()
+      chat_id:id,
+      message_id:mid,
+      reply_markup:backBtn()
     });
   }
 
@@ -277,35 +288,43 @@ bot.on("callback_query", async (q)=>{
     }
 
     return bot.editMessageText(text,{
-      chat_id:id,message_id:mid,reply_markup:backBtn()
+      chat_id:id,
+      message_id:mid,
+      reply_markup:backBtn()
     });
   }
 
   // MENU
   if(data==="menu"){
     return bot.editMessageText(menu(u).text,{
-      chat_id:id,message_id:mid,reply_markup:menu(u).reply_markup
+      chat_id:id,
+      message_id:mid,
+      reply_markup:menu(u).reply_markup
     });
   }
 
   // LANG
   if(data==="lang"){
     return bot.editMessageText("🌍",{
-      chat_id:id,message_id:mid,reply_markup:langMenu().reply_markup
+      chat_id:id,
+      message_id:mid,
+      reply_markup:langMenu().reply_markup
     });
   }
 
   if(data.startsWith("lang_")){
     u.lang = data.split("_")[1];
     await saveUser(id,u);
+
     return bot.editMessageText(menu(u).text,{
-      chat_id:id,message_id:mid,reply_markup:menu(u).reply_markup
+      chat_id:id,
+      message_id:mid,
+      reply_markup:menu(u).reply_markup
     });
   }
-
 });
 
-// 🔥 PORT FIX (ÇOK ÖNEMLİ)
+// SERVER (RENDER FIX)
 const PORT = process.env.PORT || 3000;
 
 app.post(`/bot${process.env.BOT_TOKEN}`, (req,res)=>{
