@@ -81,9 +81,54 @@ async function saveRequest(id, data){
 
 // TEXTS
 const texts = {
-  tr:{menu:"🎰 Menü",play:"🎮 Oyna (50⭐)",balance:"⭐ Bakiye",buy:"💰 Yükle",ref:"👥 Davet",withdraw:"💸 Çek",my:"📄 Taleplerim",top:"🏆 Liderler",lang:"🌍 Dil",noMoney:"❌ Yetersiz bakiye",spinning:"🎰 Çark dönüyor...",lose:"😢 Kaybettin",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"},
-  en:{menu:"🎰 Menu",play:"🎮 Play (50⭐)",balance:"⭐ Balance",buy:"💰 Deposit",ref:"👥 Invite",withdraw:"💸 Withdraw",my:"📄 Requests",top:"🏆 Leaderboard",lang:"🌍 Language",noMoney:"❌ Not enough balance",spinning:"🎰 Spinning...",lose:"😢 Lost",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"},
-  ru:{menu:"🎰 Меню",play:"🎮 Играть (50⭐)",balance:"⭐ Баланс",buy:"💰 Пополнить",ref:"👥 Пригласить",withdraw:"💸 Вывод",my:"📄 Мои заявки",top:"🏆 Топ",lang:"🌍 Язык",noMoney:"❌ Недостаточно средств",spinning:"🎰 Крутится...",lose:"😢 Проигрыш",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"}
+  tr:{
+    menu:"🎰 Menü",
+    play:"🎮 Oyna (50⭐)",
+    balance:"⭐ Bakiye",
+    buy:"💰 Yükle",
+    ref:"👥 Davet",
+    withdraw:"💸 Çek",
+    my:"📄 Taleplerim",
+    top:"🏆 Liderler",
+    lang:"🌍 Dil",
+    noMoney:"❌ Yetersiz bakiye",
+    spinning:"🎰 Çark dönüyor...",
+    lose:"😢 Kaybettin",
+    win:(x)=>`🎉 +${x}⭐`,
+    ask:"💰 (25-10000)"
+  },
+  en:{
+    menu:"🎰 Menu",
+    play:"🎮 Play (50⭐)",
+    balance:"⭐ Balance",
+    buy:"💰 Deposit",
+    ref:"👥 Invite",
+    withdraw:"💸 Withdraw",
+    my:"📄 Requests",
+    top:"🏆 Leaderboard",
+    lang:"🌍 Language",
+    noMoney:"❌ Not enough balance",
+    spinning:"🎰 Spinning...",
+    lose:"😢 Lost",
+    win:(x)=>`🎉 +${x}⭐`,
+    ask:"💰 (25-10000)"
+  },
+  ru:{
+    menu:"🎰 Меню",
+    play:"🎮 Играть (50⭐)",
+    balance:"⭐ Баланс",
+    buy:"💰 Пополнить",
+    ref:"👥 Пригласить",
+    withdraw:"💸 Вывод",
+    my:"📄 Мои заявки",
+    top:"🏆 Топ",
+    lang:"🌍 Язык",
+    noMoney:"❌ Недостаточно средств",
+    spinning:"🎰 Крутится...",
+    lose:"😢 Проигрыш",
+    win:(x)=>`🎉 +${x}⭐`,
+    ask:"💰 (25-10000)"
+  }
 };
 
 // MENU
@@ -112,25 +157,19 @@ function menu(u){
   };
 }
 
-// START
+// START (USERNAME FIX)
 bot.onText(/\/start/, async (msg)=>{
   const id = msg.chat.id;
-  const username = msg.from.username || "user";
+  const username = msg.from.username || msg.from.first_name || "user";
 
   let u = await getUser(id);
 
   if(!u){
-    u = {
-      stars:100,
-      refs:0,
-      lang:"tr",
-      username: username
-    };
-    await saveUser(id,u);
+    u = {stars:100,refs:0,lang:"tr",username};
+  } else {
+    u.username = username;
   }
 
-  // username update
-  u.username = username;
   await saveUser(id,u);
 
   bot.sendMessage(id,menu(u).text,{reply_markup:menu(u).reply_markup});
@@ -178,7 +217,6 @@ bot.on("callback_query", async (q)=>{
     await saveUser(id,u);
 
     await bot.editMessageText(t.spinning,{chat_id:id,message_id:mid});
-
     await new Promise(r=>setTimeout(r,1000));
 
     let win = spin();
@@ -201,9 +239,8 @@ bot.on("callback_query", async (q)=>{
 
   // BUY
   if(data==="buy"){
-    u.waiting = true;
+    u.waiting=true;
     await saveUser(id,u);
-
     return bot.editMessageText(t.ask,{
       chat_id:id,message_id:mid,reply_markup:backBtn()
     });
@@ -286,7 +323,7 @@ bot.on("callback_query", async (q)=>{
     });
   }
 
-  // LEADERBOARD (USERNAME FIX)
+  // LEADERBOARD (USERNAME)
   if(data==="top"){
     let top = await redis.zrange("leaderboard", 0, 9, { rev: true });
 
@@ -296,7 +333,7 @@ bot.on("callback_query", async (q)=>{
       let uid = top[i];
       let user = await getUser(uid);
 
-      let name = user?.username ? "@" + user.username : "user";
+      let name = user?.username ? "@" + user.username : uid;
 
       text += `${i+1}. ${name} - ⭐ ${user?.stars || 0}\n`;
     }
