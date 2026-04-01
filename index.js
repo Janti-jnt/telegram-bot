@@ -6,6 +6,8 @@ const bot = new TelegramBot(process.env.BOT_TOKEN);
 const app = express();
 app.use(express.json());
 
+const ADMIN_ID = process.env.ADMIN_ID;
+
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
@@ -58,15 +60,66 @@ async function getUser(id){
 async function saveUser(id,data){
   await redis.set(`user:${id}`, data);
 
-  // ✅ leaderboard fix
-  await redis.zadd("leaderboard", data.stars, id.toString());
+  // 🔥 leaderboard güncelle
+  await redis.zadd("leaderboard", {
+    score: data.stars,
+    member: id.toString()
+  });
 }
 
 // TEXTS
 const texts = {
-  tr:{menu:"🎰 Menü",play:"🎮 Oyna (50⭐)",balance:"⭐ Bakiye",buy:"💰 Yükle",ref:"👥 Davet",withdraw:"💸 Çek",my:"📄 Taleplerim",top:"🏆 Liderler",lang:"🌍 Dil",noMoney:"❌ Yetersiz bakiye",spinning:"🎰 Çark dönüyor...",lose:"😢 Kaybettin",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"},
-  en:{menu:"🎰 Menu",play:"🎮 Play (50⭐)",balance:"⭐ Balance",buy:"💰 Deposit",ref:"👥 Invite",withdraw:"💸 Withdraw",my:"📄 Requests",top:"🏆 Leaderboard",lang:"🌍 Language",noMoney:"❌ Not enough balance",spinning:"🎰 Spinning...",lose:"😢 Lost",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"},
-  ru:{menu:"🎰 Меню",play:"🎮 Играть (50⭐)",balance:"⭐ Баланс",buy:"💰 Пополнить",ref:"👥 Пригласить",withdraw:"💸 Вывод",my:"📄 Мои заявки",top:"🏆 Топ",lang:"🌍 Язык",noMoney:"❌ Недостаточно средств",spinning:"🎰 Крутится...",lose:"😢 Проигрыш",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"}
+  tr:{
+    menu:"🎰 Menü",
+    play:"🎮 Oyna (50⭐)",
+    balance:"⭐ Bakiye",
+    buy:"💰 Yükle",
+    ref:"👥 Davet",
+    withdraw:"💸 Çek",
+    my:"📄 Taleplerim",
+    top:"🏆 Liderler",
+    lang:"🌍 Dil",
+    noMoney:"❌ Yetersiz bakiye",
+    spinning:"🎰 Çark dönüyor...",
+    lose:"😢 Kaybettin",
+    win:(x)=>`🎉 +${x}⭐`,
+    ask:"💰 (25-10000)",
+    waiting:"⏳ Bekleniyor"
+  },
+  en:{
+    menu:"🎰 Menu",
+    play:"🎮 Play (50⭐)",
+    balance:"⭐ Balance",
+    buy:"💰 Deposit",
+    ref:"👥 Invite",
+    withdraw:"💸 Withdraw",
+    my:"📄 My requests",
+    top:"🏆 Leaderboard",
+    lang:"🌍 Language",
+    noMoney:"❌ Not enough balance",
+    spinning:"🎰 Spinning...",
+    lose:"😢 Lost",
+    win:(x)=>`🎉 +${x}⭐`,
+    ask:"💰 (25-10000)",
+    waiting:"⏳ Pending"
+  },
+  ru:{
+    menu:"🎰 Меню",
+    play:"🎮 Играть (50⭐)",
+    balance:"⭐ Баланс",
+    buy:"💰 Пополнить",
+    ref:"👥 Пригласить",
+    withdraw:"💸 Вывод",
+    my:"📄 Мои заявки",
+    top:"🏆 Топ",
+    lang:"🌍 Язык",
+    noMoney:"❌ Недостаточно средств",
+    spinning:"🎰 Крутится...",
+    lose:"😢 Проигрыш",
+    win:(x)=>`🎉 +${x}⭐`,
+    ask:"💰 (25-10000)",
+    waiting:"⏳ В ожидании"
+  }
 };
 
 // MENU
@@ -109,7 +162,7 @@ function langMenu(){
 }
 
 // START
-bot.onText(/\/start/, async (msg)=>{
+bot.onText(/\/start(?: (.+))?/, async (msg,match)=>{
   const id = msg.chat.id;
   let u = await getUser(id);
 
@@ -146,78 +199,43 @@ bot.on("message", async (msg)=>{
 
 // CALLBACKS
 bot.on("callback_query", async (q)=>{
-  try{ await bot.answerCallbackQuery(q.id); }catch(e){}
-
   const id = q.message.chat.id;
   const mid = q.message.message_id;
   const data = q.data;
+
+  await bot.answerCallbackQuery(q.id);
 
   let u = await getUser(id);
   if(!u) return;
 
   const t = texts[u.lang];
 
-  // 🎮 PLAY (FIXED)
+  // 🎮 PLAY
   if(data==="play"){
     if(u.stars < SPIN_COST){
-      return bot.editMessageText(t.noMoney,{
-        chat_id:id,
-        message_id:mid,
-        reply_markup:backBtn()
-      });
+      return bot.editMessageText(t.noMoney,{chat_id:id,message_id:mid,reply_markup:backBtn()});
     }
 
     u.stars -= SPIN_COST;
-    await saveUser(id,u);
+    await bot.editMessageText(t.spinning,{chat_id:id,message_id:mid});
 
-    await bot.editMessageText(t.spinning,{
-      chat_id:id,
-      message_id:mid
-    });
-
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise(r=>setTimeout(r,1000));
 
     let win = spin();
 
-    if(win > 0){
+    if(win>0){
       u.stars += win;
     }
 
     await saveUser(id,u);
 
     return bot.editMessageText(
-      win > 0 
-        ? `${t.win(win)}\n⭐ ${u.stars}` 
-        : `${t.lose}\n⭐ ${u.stars}`,
-      {
-        chat_id:id,
-        message_id:mid,
-        reply_markup:backBtn()
-      }
+      win>0 ? `${t.win(win)}\n⭐ ${u.stars}` : `${t.lose}\n⭐ ${u.stars}`,
+      {chat_id:id,message_id:mid,reply_markup:backBtn()}
     );
   }
 
-  // BALANCE
-  if(data==="balance"){
-    return bot.editMessageText(`⭐ ${u.stars}\n👥 ${u.refs}`,{
-      chat_id:id,message_id:mid,reply_markup:backBtn()
-    });
-  }
-
-  // BUY
-  if(data==="buy"){
-    u.waiting=true;
-    await saveUser(id,u);
-    return bot.editMessageText(t.ask,{chat_id:id,message_id:mid,reply_markup:backBtn()});
-  }
-
-  // REF
-  if(data==="ref"){
-    const link = `https://t.me/${process.env.BOT_USERNAME}?start=${id}`;
-    return bot.editMessageText(`${link}\n👥 ${u.refs}`,{chat_id:id,message_id:mid,reply_markup:backBtn()});
-  }
-
-  // LEADERBOARD
+  // 🏆 LEADERBOARD
   if(data==="top"){
     let top = await redis.zrange("leaderboard", 0, 9, { rev: true });
 
@@ -230,34 +248,20 @@ bot.on("callback_query", async (q)=>{
       text += `${i+1}. ${uid} - ⭐ ${user?.stars || 0}\n`;
     }
 
-    return bot.editMessageText(text,{chat_id:id,message_id:mid,reply_markup:backBtn()});
+    return bot.editMessageText(text,{
+      chat_id:id,
+      message_id:mid,
+      reply_markup:backBtn()
+    });
   }
 
   // MENU
   if(data==="menu"){
     return bot.editMessageText(menu(u).text,{
-      chat_id:id,message_id:mid,reply_markup:menu(u).reply_markup
+      chat_id:id,
+      message_id:mid,
+      reply_markup:menu(u).reply_markup
     });
   }
 
-  // LANG
-  if(data==="lang"){
-    return bot.editMessageText("🌍",{chat_id:id,message_id:mid,reply_markup:langMenu().reply_markup});
-  }
-
-  if(data.startsWith("lang_")){
-    u.lang = data.split("_")[1];
-    await saveUser(id,u);
-    return bot.editMessageText(menu(u).text,{chat_id:id,message_id:mid,reply_markup:menu(u).reply_markup});
-  }
-
 });
-
-// WEBHOOK
-app.post(`/bot${process.env.BOT_TOKEN}`, (req,res)=>{
-  bot.processUpdate(req.body);
-  res.sendStatus(200);
-});
-
-app.get("/", (req,res)=>res.send("ok"));
-app.listen(process.env.PORT || 3000);
