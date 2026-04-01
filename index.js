@@ -60,11 +60,8 @@ async function getUser(id){
 async function saveUser(id,data){
   await redis.set(`user:${id}`, data);
 
-  // 🔥 leaderboard güncelle
-  await redis.zadd("leaderboard", {
-    score: data.stars,
-    member: id.toString()
-  });
+  // ✅ leaderboard FIX
+  await redis.zadd("leaderboard", data.stars, id.toString());
 }
 
 // TEXTS
@@ -162,7 +159,7 @@ function langMenu(){
 }
 
 // START
-bot.onText(/\/start(?: (.+))?/, async (msg,match)=>{
+bot.onText(/\/start(?: (.+))?/, async (msg)=>{
   const id = msg.chat.id;
   let u = await getUser(id);
 
@@ -199,27 +196,29 @@ bot.on("message", async (msg)=>{
 
 // CALLBACKS
 bot.on("callback_query", async (q)=>{
+  try{ await bot.answerCallbackQuery(q.id); }catch(e){}
+
   const id = q.message.chat.id;
   const mid = q.message.message_id;
   const data = q.data;
-
-  await bot.answerCallbackQuery(q.id);
 
   let u = await getUser(id);
   if(!u) return;
 
   const t = texts[u.lang];
 
-  // 🎮 PLAY
+  // 🎮 PLAY FIXED
   if(data==="play"){
     if(u.stars < SPIN_COST){
       return bot.editMessageText(t.noMoney,{chat_id:id,message_id:mid,reply_markup:backBtn()});
     }
 
     u.stars -= SPIN_COST;
+    await saveUser(id,u);
+
     await bot.editMessageText(t.spinning,{chat_id:id,message_id:mid});
 
-    await new Promise(r=>setTimeout(r,1000));
+    await new Promise(r => setTimeout(r, 800));
 
     let win = spin();
 
@@ -235,7 +234,7 @@ bot.on("callback_query", async (q)=>{
     );
   }
 
-  // 🏆 LEADERBOARD
+  // 🏆 LEADERBOARD FIXED
   if(data==="top"){
     let top = await redis.zrange("leaderboard", 0, 9, { rev: true });
 
@@ -244,24 +243,14 @@ bot.on("callback_query", async (q)=>{
     for(let i=0;i<top.length;i++){
       let uid = top[i];
       let user = await getUser(uid);
-
       text += `${i+1}. ${uid} - ⭐ ${user?.stars || 0}\n`;
     }
 
-    return bot.editMessageText(text,{
-      chat_id:id,
-      message_id:mid,
-      reply_markup:backBtn()
-    });
+    return bot.editMessageText(text,{chat_id:id,message_id:mid,reply_markup:backBtn()});
   }
 
-  // MENU
   if(data==="menu"){
-    return bot.editMessageText(menu(u).text,{
-      chat_id:id,
-      message_id:mid,
-      reply_markup:menu(u).reply_markup
-    });
+    return bot.editMessageText(menu(u).text,{chat_id:id,message_id:mid,reply_markup:menu(u).reply_markup});
   }
 
 });
