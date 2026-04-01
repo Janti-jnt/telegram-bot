@@ -13,6 +13,7 @@ const redis = new Redis({
 
 const SPIN_COST = 50;
 
+// 🎯 REWARDS
 const rewards = [
   {amount:5, chance:26},
   {amount:10, chance:14},
@@ -43,19 +44,29 @@ function backBtn(){
 
 // USER
 async function getUser(id){
-  return await redis.get(`user:${id}`);
+  let u = await redis.get(`user:${id}`);
+  if(!u) return null;
+
+  if(typeof u.refs !== "number") u.refs = 0;
+  if(typeof u.stars !== "number") u.stars = 0;
+  if(typeof u.waiting !== "boolean") u.waiting = false;
+  if(!u.lang) u.lang = null;
+
+  return u;
 }
 
 async function saveUser(id,data){
   await redis.set(`user:${id}`, data);
+
+  // ✅ DOĞRU leaderboard kayıt
   await redis.zadd("leaderboard", data.stars, id.toString());
 }
 
 // TEXTS
 const texts = {
-  tr:{menu:"🎰 Menü",play:"🎮 Oyna (50⭐)",balance:"⭐ Bakiye",buy:"💰 Yükle",ref:"👥 Davet",top:"🏆 Liderler",lang:"🌍 Dil",noMoney:"❌ Yetersiz bakiye",spinning:"🎰 Çark dönüyor...",lose:"😢 Kaybettin",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"},
-  en:{menu:"🎰 Menu",play:"🎮 Play (50⭐)",balance:"⭐ Balance",buy:"💰 Deposit",ref:"👥 Invite",top:"🏆 Leaderboard",lang:"🌍 Language",noMoney:"❌ Not enough",spinning:"🎰 Spinning...",lose:"😢 Lost",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"},
-  ru:{menu:"🎰 Меню",play:"🎮 Играть (50⭐)",balance:"⭐ Баланс",buy:"💰 Пополнить",ref:"👥 Пригласить",top:"🏆 Топ",lang:"🌍 Язык",noMoney:"❌ Недостаточно",spinning:"🎰 Крутится...",lose:"😢 Проигрыш",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"}
+  tr:{menu:"🎰 Menü",play:"🎮 Oyna (50⭐)",balance:"⭐ Bakiye",buy:"💰 Yükle",ref:"👥 Davet",withdraw:"💸 Çek",my:"📄 Taleplerim",top:"🏆 Liderler",lang:"🌍 Dil",noMoney:"❌ Yetersiz bakiye",spinning:"🎰 Çark dönüyor...",lose:"😢 Kaybettin",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"},
+  en:{menu:"🎰 Menu",play:"🎮 Play (50⭐)",balance:"⭐ Balance",buy:"💰 Deposit",ref:"👥 Invite",withdraw:"💸 Withdraw",my:"📄 My requests",top:"🏆 Leaderboard",lang:"🌍 Language",noMoney:"❌ Not enough balance",spinning:"🎰 Spinning...",lose:"😢 Lost",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"},
+  ru:{menu:"🎰 Меню",play:"🎮 Играть (50⭐)",balance:"⭐ Баланс",buy:"💰 Пополнить",ref:"👥 Пригласить",withdraw:"💸 Вывод",my:"📄 Мои заявки",top:"🏆 Топ",lang:"🌍 Язык",noMoney:"❌ Недостаточно средств",spinning:"🎰 Крутится...",lose:"😢 Проигрыш",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"}
 };
 
 // MENU
@@ -72,9 +83,11 @@ function menu(u){
         ],
         [
           {text:t.ref,callback_data:"ref"},
-          {text:t.top,callback_data:"top"}
+          {text:t.withdraw,callback_data:"withdraw"},
+          {text:t.my,callback_data:"my"}
         ],
         [
+          {text:t.top,callback_data:"top"},
           {text:t.lang,callback_data:"lang"}
         ]
       ]
@@ -98,11 +111,10 @@ function langMenu(){
 // START
 bot.onText(/\/start/, async (msg)=>{
   const id = msg.chat.id;
-
   let u = await getUser(id);
 
   if(!u){
-    u = {stars:100,refs:0,lang:null,waiting:false};
+    u = {stars:100,refs:0,lang:null};
     await saveUser(id,u);
   }
 
@@ -113,13 +125,30 @@ bot.onText(/\/start/, async (msg)=>{
   bot.sendMessage(id,menu(u).text,{reply_markup:menu(u).reply_markup});
 });
 
+// BUY
+bot.on("message", async (msg)=>{
+  const id = msg.chat.id;
+  let u = await getUser(id);
+  if(!u || !u.waiting) return;
+
+  let n = parseInt(msg.text);
+
+  if(n>=25 && n<=10000){
+    u.stars += n;
+    u.waiting = false;
+    await saveUser(id,u);
+
+    return bot.sendMessage(id,`✅ +${n}⭐`,{
+      reply_markup:menu(u).reply_markup
+    });
+  }
+});
+
 // CALLBACKS
 bot.on("callback_query", async (q)=>{
 
-  // 🔥 EN ÖNEMLİ FIX
-  try{
-    await bot.answerCallbackQuery(q.id);
-  }catch(e){}
+  // 🔥 callback fix
+  try{ await bot.answerCallbackQuery(q.id); }catch(e){}
 
   const id = q.message.chat.id;
   const mid = q.message.message_id;
@@ -136,8 +165,6 @@ bot.on("callback_query", async (q)=>{
     }
 
     u.stars -= SPIN_COST;
-    await saveUser(id,u);
-
     await bot.editMessageText(t.spinning,{chat_id:id,message_id:mid});
 
     setTimeout(async ()=>{
@@ -156,9 +183,7 @@ bot.on("callback_query", async (q)=>{
   }
 
   if(data==="balance"){
-    return bot.editMessageText(`⭐ ${u.stars}`,{
-      chat_id:id,message_id:mid,reply_markup:backBtn()
-    });
+    return bot.editMessageText(`⭐ ${u.stars}\n👥 ${u.refs}`,{chat_id:id,message_id:mid,reply_markup:backBtn()});
   }
 
   if(data==="buy"){
@@ -169,7 +194,7 @@ bot.on("callback_query", async (q)=>{
 
   if(data==="ref"){
     const link = `https://t.me/${process.env.BOT_USERNAME}?start=${id}`;
-    return bot.editMessageText(link,{chat_id:id,message_id:mid,reply_markup:backBtn()});
+    return bot.editMessageText(`${link}\n👥 ${u.refs}`,{chat_id:id,message_id:mid,reply_markup:backBtn()});
   }
 
   if(data==="top"){
@@ -180,6 +205,7 @@ bot.on("callback_query", async (q)=>{
     for(let i=0;i<top.length;i++){
       let uid = top[i];
       let user = await getUser(uid);
+
       text += `${i+1}. ${uid} - ⭐ ${user?.stars || 0}\n`;
     }
 
@@ -187,9 +213,7 @@ bot.on("callback_query", async (q)=>{
   }
 
   if(data==="menu"){
-    return bot.editMessageText(menu(u).text,{
-      chat_id:id,message_id:mid,reply_markup:menu(u).reply_markup
-    });
+    return bot.editMessageText(menu(u).text,{chat_id:id,message_id:mid,reply_markup:menu(u).reply_markup});
   }
 
   if(data==="lang"){
@@ -199,9 +223,7 @@ bot.on("callback_query", async (q)=>{
   if(data.startsWith("lang_")){
     u.lang = data.split("_")[1];
     await saveUser(id,u);
-    return bot.editMessageText(menu(u).text,{
-      chat_id:id,message_id:mid,reply_markup:menu(u).reply_markup
-    });
+    return bot.editMessageText(menu(u).text,{chat_id:id,message_id:mid,reply_markup:menu(u).reply_markup});
   }
 
 });
