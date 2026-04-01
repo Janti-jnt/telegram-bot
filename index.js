@@ -30,25 +30,55 @@ async function saveUser(id,data){
   await redis.set(`user:${id}`, data);
 }
 
-// TEXTS (KISA TUTTUM AMA TAM ÇALIŞIR)
+// TEXTS
 const texts = {
-  tr: {
+  tr:{
     menu:"🎰 Menü",
+    play:"🎮 Oyna",
+    balance:"⭐ Bakiye",
+    buy:"💰 Yükle",
+    ref:"👥 Davet",
     withdraw:"💸 Çek",
     my:"📄 Taleplerim",
-    done:"✅ Onaylandı",
+    withdrawMenu:"💸 Miktar seç",
+    noMoney:"❌ Yetersiz bakiye",
+    spinning:"🎰 Çark dönüyor...",
+    lose:"😢 Kaybettin",
+    win:(x)=>`🎉 +${x}⭐`,
+    ask:"(25-10000)",
+    request:(id,a,d,t)=>`Talep #${id}\n${a}⭐\nTarih: ${d} Saat: ${t}\n✅ Onaylandı`
   },
-  en: {
+  en:{
     menu:"🎰 Menu",
+    play:"🎮 Play",
+    balance:"⭐ Balance",
+    buy:"💰 Deposit",
+    ref:"👥 Invite",
     withdraw:"💸 Withdraw",
-    my:"📄 My requests",
-    done:"✅ Approved",
+    my:"📄 Requests",
+    withdrawMenu:"💸 Choose amount",
+    noMoney:"❌ Not enough balance",
+    spinning:"🎰 Spinning...",
+    lose:"😢 Lost",
+    win:(x)=>`🎉 +${x}⭐`,
+    ask:"(25-10000)",
+    request:(id,a,d,t)=>`Request #${id}\n${a}⭐\nDate: ${d} Time: ${t}\n✅ Approved`
   },
-  ru: {
+  ru:{
     menu:"🎰 Меню",
+    play:"🎮 Играть",
+    balance:"⭐ Баланс",
+    buy:"💰 Пополнить",
+    ref:"👥 Пригласить",
     withdraw:"💸 Вывод",
     my:"📄 Мои заявки",
-    done:"✅ Одобрено",
+    withdrawMenu:"💸 Выбери сумму",
+    noMoney:"❌ Недостаточно средств",
+    spinning:"🎰 Крутится...",
+    lose:"😢 Проигрыш",
+    win:(x)=>`🎉 +${x}⭐`,
+    ask:"(25-10000)",
+    request:(id,a,d,t)=>`Заявка #${id}\n${a}⭐\nЧисло: ${d} Время: ${t}\n✅ Одобрено`
   }
 };
 
@@ -59,19 +89,13 @@ function menu(u){
     text:t.menu,
     reply_markup:{
       inline_keyboard:[
-        [{text:"💸",callback_data:"withdraw"}],
+        [{text:t.play,callback_data:"play"}],
+        [{text:t.balance,callback_data:"balance"}],
+        [{text:t.buy,callback_data:"buy"}],
+        [{text:t.ref,callback_data:"ref"}],
+        [{text:t.withdraw,callback_data:"withdraw"}],
         [{text:t.my,callback_data:"my"}]
       ]
-    }
-  };
-}
-
-// WITHDRAW OPTIONS
-function withdrawMenu(){
-  const amounts = [15,25,50,100,350,500,650,1000];
-  return {
-    reply_markup:{
-      inline_keyboard: amounts.map(a=>[{text:`${a}⭐`,callback_data:`w_${a}`}])
     }
   };
 }
@@ -82,7 +106,7 @@ bot.onText(/\/start/, async (msg)=>{
 
   let u = await getUser(id);
   if(!u){
-    u = {stars:0,refs:0,lang:"ru"};
+    u = {stars:50,refs:0,lang:"ru"};
     await saveUser(id,u);
   }
 
@@ -90,114 +114,162 @@ bot.onText(/\/start/, async (msg)=>{
   bot.sendMessage(id,m.text,{reply_markup:m.reply_markup});
 });
 
+// INPUT
+bot.on("message", async (msg)=>{
+  const id = msg.chat.id;
+
+  let u = await getUser(id);
+  if(!u || !u.waiting) return;
+
+  let n = parseInt(msg.text);
+  if(n>=25 && n<=10000){
+    u.stars+=n;
+    u.waiting=false;
+    await saveUser(id,u);
+
+    const m = menu(u);
+    bot.sendMessage(id,`✅ +${n}⭐`,{reply_markup:m.reply_markup});
+  }
+});
+
 // BUTTONS
 bot.on("callback_query", async (q)=>{
   const id = q.message.chat.id;
-  const data = q.data;
   const mid = q.message.message_id;
+  const data = q.data;
+
+  await bot.answerCallbackQuery(q.id);
 
   let u = await getUser(id);
   if(!u) return;
 
   const t = texts[u.lang];
 
-  await bot.answerCallbackQuery(q.id);
-
-  // withdraw menu
-  if(data==="withdraw"){
-    return bot.editMessageText("💸",{
-      chat_id:id,
-      message_id:mid,
-      reply_markup:withdrawMenu().reply_markup
-    });
-  }
-
-  // create request
-  if(data.startsWith("w_")){
-    const amount = parseInt(data.split("_")[1]);
-
-    if(u.stars < amount){
-      return bot.answerCallbackQuery(q.id,{text:"❌"});
-    }
-
-    u.stars -= amount;
-    await saveUser(id,u);
-
-    let count = await redis.incr("withdraw_id");
-
-    const now = new Date();
-    const time = now.toLocaleTimeString();
-    const date = now.toLocaleDateString();
-
-    const req = {
-      id:count,
-      amount,
-      time,
-      date,
-      status:"done"
-    };
-
-    let list = await redis.get(`req_${id}`) || [];
-    list.push(req);
-    await redis.set(`req_${id}`,list);
-
-    // USER SCREEN
-    await bot.editMessageText(
-`Заявка #${count}
-${amount}⭐
-Число: ${date} Время: ${time}
-${t.done}`,
-      {
+  // PLAY
+  if(data==="play"){
+    if(u.stars<=0){
+      return bot.editMessageText(t.noMoney,{
         chat_id:id,
         message_id:mid,
-        reply_markup:{
-          inline_keyboard:[
-            [{text:"🔙",callback_data:"menu"}]
-          ]
-        }
-      }
-    );
-
-    // ADMIN MESSAGE
-    bot.sendMessage(ADMIN_ID,
-`🔥 NEW WITHDRAW
-
-ID: #${count}
-User: @${q.from.username || "no_username"}
-Amount: ${amount}⭐
-Time: ${date} ${time}`
-    );
-
-  }
-
-  // MY REQUESTS
-  if(data==="my"){
-    let list = await redis.get(`req_${id}`) || [];
-
-    if(list.length === 0){
-      return bot.editMessageText("❌",{
-        chat_id:id,
-        message_id:mid
+        reply_markup:{inline_keyboard:[[{text:"🔙",callback_data:"menu"}]]}
       });
     }
 
-    let text = list.map(r=>
-`#${r.id} • ${r.amount}⭐ • ${r.date} ${r.time}`
-    ).join("\n");
+    u.stars--;
+    await bot.editMessageText(t.spinning,{chat_id:id,message_id:mid});
+    await new Promise(r=>setTimeout(r,1000));
 
-    return bot.editMessageText(text,{
+    let text;
+    if(Math.random()<0.6){
+      text=t.lose;
+    }else{
+      let w=Math.floor(Math.random()*5)+1;
+      u.stars+=w;
+      text=t.win(w);
+    }
+
+    await saveUser(id,u);
+
+    return bot.editMessageText(`${text}\n\n⭐ ${u.stars}`,{
+      chat_id:id,
+      message_id:mid,
+      reply_markup:{inline_keyboard:[[{text:"🔙",callback_data:"menu"}]]}
+    });
+  }
+
+  // BALANCE
+  if(data==="balance"){
+    return bot.editMessageText(`⭐ ${u.stars}\n👥 ${u.refs}`,{
+      chat_id:id,
+      message_id:mid,
+      reply_markup:{inline_keyboard:[[{text:"🔙",callback_data:"menu"}]]}
+    });
+  }
+
+  // BUY
+  if(data==="buy"){
+    u.waiting=true;
+    await saveUser(id,u);
+
+    return bot.editMessageText(t.ask,{
+      chat_id:id,
+      message_id:mid,
+      reply_markup:{inline_keyboard:[[{text:"🔙",callback_data:"menu"}]]}
+    });
+  }
+
+  // WITHDRAW MENU
+  if(data==="withdraw"){
+    return bot.editMessageText(t.withdrawMenu,{
       chat_id:id,
       message_id:mid,
       reply_markup:{
         inline_keyboard:[
+          [15,25,50].map(a=>({text:`${a}⭐`,callback_data:`w_${a}`})),
+          [100,350,500].map(a=>({text:`${a}⭐`,callback_data:`w_${a}`})),
+          [650,1000].map(a=>({text:`${a}⭐`,callback_data:`w_${a}`})),
           [{text:"🔙",callback_data:"menu"}]
         ]
       }
     });
   }
 
+  // CREATE REQUEST
+  if(data.startsWith("w_")){
+    const amount=parseInt(data.split("_")[1]);
+
+    if(u.stars<amount){
+      return bot.answerCallbackQuery(q.id,{text:"❌"});
+    }
+
+    u.stars-=amount;
+    await saveUser(id,u);
+
+    let idReq=await redis.incr("wid");
+
+    let now=new Date();
+    let time=now.toLocaleTimeString();
+    let date=now.toLocaleDateString();
+
+    let list=await redis.get(`req_${id}`)||[];
+    list.push({id:idReq,amount,date,time});
+    await redis.set(`req_${id}`,list);
+
+    await bot.editMessageText(
+      t.request(idReq,amount,date,time),
+      {
+        chat_id:id,
+        message_id:mid,
+        reply_markup:{inline_keyboard:[[{text:"🔙",callback_data:"menu"}]]}
+      }
+    );
+
+    bot.sendMessage(ADMIN_ID,
+`🔥 WITHDRAW
+#${idReq}
+@${q.from.username || "no_username"}
+${amount}⭐
+${date} ${time}`);
+  }
+
+  // MY REQUESTS
+  if(data==="my"){
+    let list=await redis.get(`req_${id}`)||[];
+
+    let text=list.length
+      ? list.map(r=>`#${r.id} ${r.amount}⭐`).join("\n")
+      : "❌";
+
+    return bot.editMessageText(text,{
+      chat_id:id,
+      message_id:mid,
+      reply_markup:{inline_keyboard:[[{text:"🔙",callback_data:"menu"}]]}
+    });
+  }
+
+  // MENU
   if(data==="menu"){
-    const m = menu(u);
+    const m=menu(u);
     return bot.editMessageText(m.text,{
       chat_id:id,
       message_id:mid,
