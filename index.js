@@ -6,8 +6,6 @@ const bot = new TelegramBot(process.env.BOT_TOKEN);
 const app = express();
 app.use(express.json());
 
-const ADMIN_ID = process.env.ADMIN_ID;
-
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
@@ -80,8 +78,7 @@ const texts = {
     spinning:"🎰 Çark dönüyor...",
     lose:"😢 Kaybettin",
     win:(x)=>`🎉 +${x}⭐`,
-    ask:"💰 (25-10000)",
-    waiting:"⏳ Bekleniyor"
+    ask:"💰 (25-10000)"
   },
   en:{
     menu:"🎰 Menu",
@@ -90,15 +87,14 @@ const texts = {
     buy:"💰 Deposit",
     ref:"👥 Invite",
     withdraw:"💸 Withdraw",
-    my:"📄 My requests",
+    my:"📄 Requests",
     top:"🏆 Leaderboard",
     lang:"🌍 Language",
     noMoney:"❌ Not enough balance",
     spinning:"🎰 Spinning...",
     lose:"😢 Lost",
     win:(x)=>`🎉 +${x}⭐`,
-    ask:"💰 (25-10000)",
-    waiting:"⏳ Pending"
+    ask:"💰 (25-10000)"
   },
   ru:{
     menu:"🎰 Меню",
@@ -107,15 +103,14 @@ const texts = {
     buy:"💰 Пополнить",
     ref:"👥 Пригласить",
     withdraw:"💸 Вывод",
-    my:"📄 Мои заявки",
+    my:"📄 Заявки",
     top:"🏆 Топ",
     lang:"🌍 Язык",
     noMoney:"❌ Недостаточно средств",
     spinning:"🎰 Крутится...",
     lose:"😢 Проигрыш",
     win:(x)=>`🎉 +${x}⭐`,
-    ask:"💰 (25-10000)",
-    waiting:"⏳ В ожидании"
+    ask:"💰 (25-10000)"
   }
 };
 
@@ -159,7 +154,7 @@ function langMenu(){
 }
 
 // START
-bot.onText(/\/start(?: (.+))?/, async (msg)=>{
+bot.onText(/\/start/, async (msg)=>{
   const id = msg.chat.id;
   let u = await getUser(id);
 
@@ -207,16 +202,23 @@ bot.on("callback_query", async (q)=>{
 
   const t = texts[u.lang];
 
-  // 🎮 PLAY FIXED
+  // PLAY FIX
   if(data==="play"){
     if(u.stars < SPIN_COST){
-      return bot.editMessageText(t.noMoney,{chat_id:id,message_id:mid,reply_markup:backBtn()});
+      return bot.editMessageText(t.noMoney,{
+        chat_id:id,
+        message_id:mid,
+        reply_markup:backBtn()
+      });
     }
 
     u.stars -= SPIN_COST;
     await saveUser(id,u);
 
-    await bot.editMessageText(t.spinning,{chat_id:id,message_id:mid});
+    await bot.editMessageText(t.spinning,{
+      chat_id:id,
+      message_id:mid
+    });
 
     await new Promise(r => setTimeout(r, 800));
 
@@ -230,11 +232,39 @@ bot.on("callback_query", async (q)=>{
 
     return bot.editMessageText(
       win>0 ? `${t.win(win)}\n⭐ ${u.stars}` : `${t.lose}\n⭐ ${u.stars}`,
-      {chat_id:id,message_id:mid,reply_markup:backBtn()}
+      {
+        chat_id:id,
+        message_id:mid,
+        reply_markup:backBtn()
+      }
     );
   }
 
-  // 🏆 LEADERBOARD FIXED
+  // BALANCE
+  if(data==="balance"){
+    return bot.editMessageText(`⭐ ${u.stars}\n👥 ${u.refs}`,{
+      chat_id:id,message_id:mid,reply_markup:backBtn()
+    });
+  }
+
+  // BUY
+  if(data==="buy"){
+    u.waiting=true;
+    await saveUser(id,u);
+    return bot.editMessageText(t.ask,{
+      chat_id:id,message_id:mid,reply_markup:backBtn()
+    });
+  }
+
+  // REF
+  if(data==="ref"){
+    const link = `https://t.me/${process.env.BOT_USERNAME}?start=${id}`;
+    return bot.editMessageText(`${link}\n👥 ${u.refs}`,{
+      chat_id:id,message_id:mid,reply_markup:backBtn()
+    });
+  }
+
+  // LEADERBOARD
   if(data==="top"){
     let top = await redis.zrange("leaderboard", 0, 9, { rev: true });
 
@@ -246,11 +276,47 @@ bot.on("callback_query", async (q)=>{
       text += `${i+1}. ${uid} - ⭐ ${user?.stars || 0}\n`;
     }
 
-    return bot.editMessageText(text,{chat_id:id,message_id:mid,reply_markup:backBtn()});
+    return bot.editMessageText(text,{
+      chat_id:id,message_id:mid,reply_markup:backBtn()
+    });
   }
 
+  // MENU
   if(data==="menu"){
-    return bot.editMessageText(menu(u).text,{chat_id:id,message_id:mid,reply_markup:menu(u).reply_markup});
+    return bot.editMessageText(menu(u).text,{
+      chat_id:id,message_id:mid,reply_markup:menu(u).reply_markup
+    });
   }
 
+  // LANG
+  if(data==="lang"){
+    return bot.editMessageText("🌍",{
+      chat_id:id,message_id:mid,reply_markup:langMenu().reply_markup
+    });
+  }
+
+  if(data.startsWith("lang_")){
+    u.lang = data.split("_")[1];
+    await saveUser(id,u);
+    return bot.editMessageText(menu(u).text,{
+      chat_id:id,message_id:mid,reply_markup:menu(u).reply_markup
+    });
+  }
+
+});
+
+// 🔥 PORT FIX (ÇOK ÖNEMLİ)
+const PORT = process.env.PORT || 3000;
+
+app.post(`/bot${process.env.BOT_TOKEN}`, (req,res)=>{
+  bot.processUpdate(req.body);
+  res.sendStatus(200);
+});
+
+app.get("/", (req,res)=>{
+  res.send("Bot is alive");
+});
+
+app.listen(PORT, ()=>{
+  console.log("Server running on port " + PORT);
 });
