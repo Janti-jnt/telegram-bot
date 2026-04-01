@@ -22,9 +22,9 @@ const rewards = [
   {amount:50, chance:7},
   {amount:100, chance:5},
   {amount:150, chance:3},
-  {amount:500, chance:2},
-  {amount:750, chance:1},
-  {amount:850, chance:0.04},
+  {amount:500, chance:0.50},
+  {amount:750, chance:0.03},
+  {amount:850, chance:0.02},
   {amount:950, chance:0.02},
   {amount:1000, chance:0.01},
 ];
