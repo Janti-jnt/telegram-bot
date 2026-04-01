@@ -6,12 +6,13 @@ const bot = new TelegramBot(process.env.BOT_TOKEN);
 const app = express();
 app.use(express.json());
 
+// 🔥 REDIS
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
-// USER
+// 👤 USER
 async function getUser(id){
   return await redis.get(`user:${id}`);
 }
@@ -19,7 +20,7 @@ async function saveUser(id,data){
   await redis.set(`user:${id}`, data);
 }
 
-// 🌍 TEXTS (FULL)
+// 🌍 TEXTS
 const texts = {
   tr: {
     menu:"🎰 Menü",
@@ -56,7 +57,7 @@ const texts = {
   }
 };
 
-// MENU
+// 🎛 MENU
 function menu(u){
   const t = texts[u.lang];
   return {
@@ -72,7 +73,7 @@ function menu(u){
   };
 }
 
-// LANGUAGE MENU
+// 🌍 LANG MENU
 function langMenu(){
   return {
     reply_markup:{
@@ -85,7 +86,7 @@ function langMenu(){
   };
 }
 
-// WEBHOOK
+// 🌐 WEBHOOK
 app.post(`/bot${process.env.BOT_TOKEN}`, (req,res)=>{
   bot.processUpdate(req.body);
   res.sendStatus(200);
@@ -93,7 +94,7 @@ app.post(`/bot${process.env.BOT_TOKEN}`, (req,res)=>{
 app.get("/", (req,res)=>res.send("ok"));
 app.listen(process.env.PORT || 3000);
 
-// START
+// 🚀 START (FIXLİ)
 bot.onText(/\/start/, async (msg)=>{
   const id = msg.chat.id;
 
@@ -103,15 +104,20 @@ bot.onText(/\/start/, async (msg)=>{
     await saveUser(id,u);
   }
 
+  // dil yoksa sor
   if(!u.lang){
-    return bot.sendMessage(id,"🌍",langMenu());
+    return bot.sendMessage(id,"🌍 Dil seç:",langMenu());
   }
 
   const m = menu(u);
-  bot.sendMessage(id,m.text,{reply_markup:m.reply_markup});
+
+  // 🔥 HER ZAMAN YENİ MESAJ
+  return bot.sendMessage(id, `♻️ Menü yenilendi\n\n${m.text}`, {
+    reply_markup:m.reply_markup
+  });
 });
 
-// CUSTOM YÜKLEME
+// ✍️ CUSTOM YÜKLEME
 bot.on("message", async (msg)=>{
   const id = msg.chat.id;
 
@@ -126,111 +132,122 @@ bot.on("message", async (msg)=>{
     await saveUser(id,u);
 
     const m = menu(u);
-    return bot.sendMessage(id,`✅ +${n}⭐`,{reply_markup:m.reply_markup});
-  }
-});
-
-// BUTTONS
-bot.on("callback_query", async (q)=>{
-  const id = q.message.chat.id;
-  const mid = q.message.message_id;
-  const data = q.data;
-
-  await bot.answerCallbackQuery(q.id);
-
-  let u = await getUser(id);
-  if(!u) return;
-
-  // LANG SELECT
-  if(data.startsWith("lang_")){
-    u.lang = data.split("_")[1];
-    await saveUser(id,u);
-
-    const m = menu(u);
-    return bot.editMessageText(m.text,{
-      chat_id:id,
-      message_id:mid,
+    return bot.sendMessage(id, `✅ +${n}⭐`, {
       reply_markup:m.reply_markup
     });
   }
+});
 
-  const t = texts[u.lang];
+// 🎮 BUTTONS
+bot.on("callback_query", async (q)=>{
+  try{
+    const id = q.message.chat.id;
+    const mid = q.message.message_id;
+    const data = q.data;
 
-  if(data==="lang"){
-    return bot.editMessageText("🌍",{
-      chat_id:id,
-      message_id:mid,
-      reply_markup:langMenu().reply_markup
-    });
-  }
+    await bot.answerCallbackQuery(q.id);
 
-  if(data==="play"){
-    if(u.stars<=0){
-      return bot.editMessageText("❌",{
+    let u = await getUser(id);
+    if(!u) return;
+
+    // 🌍 LANG SELECT
+    if(data.startsWith("lang_")){
+      u.lang = data.split("_")[1] || "tr";
+      await saveUser(id,u);
+
+      const m = menu(u);
+      return bot.editMessageText(m.text,{
+        chat_id:id,
+        message_id:mid,
+        reply_markup:m.reply_markup
+      });
+    }
+
+    const t = texts[u.lang];
+
+    if(data==="lang"){
+      return bot.editMessageText("🌍",{
+        chat_id:id,
+        message_id:mid,
+        reply_markup:langMenu().reply_markup
+      });
+    }
+
+    // 🎰 OYUN
+    if(data==="play"){
+      if(u.stars<=0){
+        return bot.editMessageText("❌",{
+          chat_id:id,
+          message_id:mid
+        });
+      }
+
+      u.stars--;
+
+      await bot.editMessageText(t.spinning,{
+        chat_id:id,
+        message_id:mid
+      });
+
+      await new Promise(r=>setTimeout(r,1200));
+
+      let text;
+      if(Math.random()<0.6){
+        text=t.lose;
+      }else{
+        let w=Math.floor(Math.random()*5)+1;
+        u.stars+=w;
+        text=t.win(w);
+      }
+
+      await saveUser(id,u);
+
+      return bot.editMessageText(`${text}\n\n⭐ ${u.stars}`,{
+        chat_id:id,
+        message_id:mid,
+        reply_markup:{
+          inline_keyboard:[
+            [{text:"🔙",callback_data:"menu"}]
+          ]
+        }
+      });
+    }
+
+    // 🔙 MENU
+    if(data==="menu"){
+      const m = menu(u);
+      return bot.editMessageText(m.text,{
+        chat_id:id,
+        message_id:mid,
+        reply_markup:m.reply_markup
+      });
+    }
+
+    // ⭐ BALANCE
+    if(data==="balance"){
+      return bot.editMessageText(`⭐ ${u.stars}`,{
+        chat_id:id,
+        message_id:mid,
+        reply_markup:{
+          inline_keyboard:[
+            [{text:"🔙",callback_data:"menu"}]
+          ]
+        }
+      });
+    }
+
+    // 💰 YÜKLE
+    if(data==="buy"){
+      u.waiting = true;
+      await saveUser(id,u);
+
+      return bot.editMessageText(t.ask,{
         chat_id:id,
         message_id:mid
       });
     }
 
-    u.stars--;
-
-    await bot.editMessageText(t.spinning,{
-      chat_id:id,
-      message_id:mid
-    });
-
-    await new Promise(r=>setTimeout(r,1200));
-
-    let text;
-    if(Math.random()<0.6){
-      text=t.lose;
-    }else{
-      let w=Math.floor(Math.random()*5)+1;
-      u.stars+=w;
-      text=t.win(w);
-    }
-
-    await saveUser(id,u);
-
-    return bot.editMessageText(`${text}\n\n⭐ ${u.stars}`,{
-      chat_id:id,
-      message_id:mid,
-      reply_markup:{
-        inline_keyboard:[
-          [{text:"🔙",callback_data:"menu"}]
-        ]
-      }
-    });
-  }
-
-  if(data==="menu"){
-    const m = menu(u);
-    return bot.editMessageText(m.text,{
-      chat_id:id,
-      message_id:mid,
-      reply_markup:m.reply_markup
-    });
-  }
-
-  if(data==="balance"){
-    return bot.editMessageText(`⭐ ${u.stars}`,{
-      chat_id:id,
-      message_id:mid,
-      reply_markup:{
-        inline_keyboard:[
-          [{text:"🔙",callback_data:"menu"}]
-        ]
-      }
-    });
-  }
-
-  if(data==="buy"){
-    u.waiting = true;
-    await saveUser(id,u);
-
-    return bot.editMessageText(t.ask,{
-      chat_id:id,
-      message_id:mid
-    });
+  }catch(e){
+    console.log(e);
   }
 });
