@@ -53,6 +53,7 @@ async function getUser(id){
   if(typeof u.stars !== "number") u.stars = 0;
   if(typeof u.waiting !== "boolean") u.waiting = false;
   if(!u.lang) u.lang = null;
+  if(!u.username) u.username = "user";
 
   return u;
 }
@@ -114,12 +115,23 @@ function menu(u){
 // START
 bot.onText(/\/start/, async (msg)=>{
   const id = msg.chat.id;
+  const username = msg.from.username || "user";
+
   let u = await getUser(id);
 
   if(!u){
-    u = {stars:100,refs:0,lang:"tr"};
+    u = {
+      stars:100,
+      refs:0,
+      lang:"tr",
+      username: username
+    };
     await saveUser(id,u);
   }
+
+  // username update
+  u.username = username;
+  await saveUser(id,u);
 
   bot.sendMessage(id,menu(u).text,{reply_markup:menu(u).reply_markup});
 });
@@ -200,13 +212,12 @@ bot.on("callback_query", async (q)=>{
   // REF
   if(data==="ref"){
     const link = `https://t.me/${process.env.BOT_USERNAME}?start=${id}`;
-
     return bot.editMessageText(`${link}\n👥 ${u.refs}`,{
       chat_id:id,message_id:mid,reply_markup:backBtn()
     });
   }
 
-  // WITHDRAW MENU
+  // WITHDRAW
   if(data==="withdraw"){
     return bot.editMessageText("💸",{
       chat_id:id,
@@ -246,7 +257,7 @@ bot.on("callback_query", async (q)=>{
     await saveRequest(id, req);
 
     if(ADMIN_ID){
-      bot.sendMessage(ADMIN_ID,`💸 Yeni Talep\nUser: ${id}\n${amount}⭐`);
+      bot.sendMessage(ADMIN_ID,`💸 Yeni Talep\n@${u.username}\n${amount}⭐`);
     }
 
     return bot.editMessageText(`✅ Talep #${reqId}`,{
@@ -275,7 +286,7 @@ bot.on("callback_query", async (q)=>{
     });
   }
 
-  // LEADERBOARD
+  // LEADERBOARD (USERNAME FIX)
   if(data==="top"){
     let top = await redis.zrange("leaderboard", 0, 9, { rev: true });
 
@@ -284,7 +295,10 @@ bot.on("callback_query", async (q)=>{
     for(let i=0;i<top.length;i++){
       let uid = top[i];
       let user = await getUser(uid);
-      text += `${i+1}. ${uid} - ⭐ ${user?.stars || 0}\n`;
+
+      let name = user?.username ? "@" + user.username : "user";
+
+      text += `${i+1}. ${name} - ⭐ ${user?.stars || 0}\n`;
     }
 
     return bot.editMessageText(text,{
