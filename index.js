@@ -13,6 +13,34 @@ const redis = new Redis({
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
+// 🎰 SPIN COST
+const SPIN_COST = 50;
+
+// 🎯 REWARDS
+const rewards = [
+  {amount:5, chance:26},
+  {amount:10, chance:14},
+  {amount:35, chance:10},
+  {amount:50, chance:7},
+  {amount:100, chance:5},
+  {amount:150, chance:3},
+  {amount:500, chance:2},
+  {amount:750, chance:1},
+  {amount:850, chance:0.04},
+  {amount:950, chance:0.02},
+  {amount:1000, chance:0.01},
+];
+
+function spin(){
+  let r = Math.random()*100;
+  let sum = 0;
+  for(let i of rewards){
+    sum += i.chance;
+    if(r <= sum) return i.amount;
+  }
+  return 0;
+}
+
 // USER
 async function getUser(id){
   let u = await redis.get(`user:${id}`);
@@ -30,62 +58,7 @@ async function saveUser(id,data){
   await redis.set(`user:${id}`, data);
 }
 
-// TEXTS
-const texts = {
-  tr:{
-    menu:"🎰 Menü",
-    play:"🎮 Oyna",
-    balance:"⭐ Bakiye",
-    buy:"💰 Yükle",
-    ref:"👥 Davet",
-    withdraw:"💸 Çek",
-    my:"📄 Taleplerim",
-    lang:"🌍 Dil",
-    withdrawMenu:"💸 Miktar seç",
-    noMoney:"❌ Yetersiz bakiye",
-    spinning:"🎰 Çark dönüyor...",
-    lose:"😢 Kaybettin",
-    win:(x)=>`🎉 +${x}⭐`,
-    ask:"💰 Miktar gir (25-10000)",
-    request:(id,a,d,t)=>`Talep #${id}\n${a}⭐\n${d} ${t}\n✅ Onaylandı`
-  },
-  en:{
-    menu:"🎰 Menu",
-    play:"🎮 Play",
-    balance:"⭐ Balance",
-    buy:"💰 Deposit",
-    ref:"👥 Invite",
-    withdraw:"💸 Withdraw",
-    my:"📄 Requests",
-    lang:"🌍 Language",
-    withdrawMenu:"💸 Choose amount",
-    noMoney:"❌ Not enough balance",
-    spinning:"🎰 Spinning...",
-    lose:"😢 Lost",
-    win:(x)=>`🎉 +${x}⭐`,
-    ask:"💰 Enter amount (25-10000)",
-    request:(id,a,d,t)=>`Request #${id}\n${a}⭐\n${d} ${t}\n✅ Approved`
-  },
-  ru:{
-    menu:"🎰 Меню",
-    play:"🎮 Играть",
-    balance:"⭐ Баланс",
-    buy:"💰 Пополнить",
-    ref:"👥 Пригласить",
-    withdraw:"💸 Вывод",
-    my:"📄 Мои заявки",
-    lang:"🌍 Язык",
-    withdrawMenu:"💸 Выбери сумму",
-    noMoney:"❌ Недостаточно средств",
-    spinning:"🎰 Крутится...",
-    lose:"😢 Проигрыш",
-    win:(x)=>`🎉 +${x}⭐`,
-    ask:"💰 Введите сумму (25-10000)",
-    request:(id,a,d,t)=>`Заявка #${id}\n${a}⭐\n${d} ${t}\n✅ Одобрено`
-  }
-};
-
-// MENU (3x3 GRID)
+// MENU
 function menu(u){
   const t = texts[u.lang];
   return {
@@ -123,29 +96,44 @@ function langMenu(){
   };
 }
 
-// START
-bot.onText(/\/start/, async (msg)=>{
+// TEXTS
+const texts = {
+  tr:{menu:"🎰 Menü",play:"🎮 Oyna (50⭐)",balance:"⭐ Bakiye",buy:"💰 Yükle",ref:"👥 Davet",withdraw:"💸 Çek",my:"📄 Talepler",lang:"🌍 Dil",noMoney:"❌ Yetersiz",spinning:"🎰 Dönüyor...",lose:"😢 Kaybettin",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"},
+  en:{menu:"🎰 Menu",play:"🎮 Play (50⭐)",balance:"⭐ Balance",buy:"💰 Deposit",ref:"👥 Invite",withdraw:"💸 Withdraw",my:"📄 Requests",lang:"🌍 Language",noMoney:"❌ Not enough",spinning:"🎰 Spinning...",lose:"😢 Lost",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"},
+  ru:{menu:"🎰 Меню",play:"🎮 Играть (50⭐)",balance:"⭐ Баланс",buy:"💰 Пополнить",ref:"👥 Пригласить",withdraw:"💸 Вывод",my:"📄 Заявки",lang:"🌍 Язык",noMoney:"❌ Недостаточно",spinning:"🎰 Крутится...",lose:"😢 Проигрыш",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"}
+};
+
+// START + REF
+bot.onText(/\/start(?: (.+))?/, async (msg,match)=>{
   const id = msg.chat.id;
+  const ref = match[1];
 
   let u = await getUser(id);
 
   if(!u){
-    u = {stars:50,refs:0,lang:null};
+    u = {stars:100,refs:0,lang:null};
     await saveUser(id,u);
+
+    if(ref && ref!=id){
+      let refUser = await getUser(ref);
+      if(refUser){
+        refUser.stars += 1.5;
+        refUser.refs += 1;
+        await saveUser(ref,refUser);
+      }
+    }
   }
 
   if(!u.lang){
-    return bot.sendMessage(id,"🌍 Dil seç / Choose / Выбери",langMenu());
+    return bot.sendMessage(id,"🌍",langMenu());
   }
 
-  const m = menu(u);
-  bot.sendMessage(id,m.text,{reply_markup:m.reply_markup});
+  bot.sendMessage(id,menu(u).text,{reply_markup:menu(u).reply_markup});
 });
 
-// TEXT INPUT (BUY)
+// INPUT BUY
 bot.on("message", async (msg)=>{
   const id = msg.chat.id;
-
   let u = await getUser(id);
   if(!u || !u.waiting) return;
 
@@ -155,12 +143,11 @@ bot.on("message", async (msg)=>{
     u.waiting=false;
     await saveUser(id,u);
 
-    const m = menu(u);
-    bot.sendMessage(id,`✅ +${n}⭐`,{reply_markup:m.reply_markup});
+    bot.sendMessage(id,`✅ +${n}⭐`);
   }
 });
 
-// BUTTONS
+// CALLBACKS
 bot.on("callback_query", async (q)=>{
   const id = q.message.chat.id;
   const mid = q.message.message_id;
@@ -173,175 +160,106 @@ bot.on("callback_query", async (q)=>{
 
   const t = texts[u.lang];
 
-  // LANG
-  if(data==="lang"){
-    return bot.editMessageText("🌍",{
-      chat_id:id,
-      message_id:mid,
-      reply_markup:langMenu().reply_markup
-    });
-  }
-
-  if(data.startsWith("lang_")){
-    u.lang = data.split("_")[1];
-    await saveUser(id,u);
-
-    const m = menu(u);
-    return bot.editMessageText(m.text,{
-      chat_id:id,
-      message_id:mid,
-      reply_markup:m.reply_markup
-    });
-  }
-
   // PLAY
   if(data==="play"){
-    if(u.stars<=0){
-      return bot.editMessageText(t.noMoney,{
-        chat_id:id,
-        message_id:mid,
-        reply_markup:{inline_keyboard:[[{text:"🔙",callback_data:"menu"}]]}
-      });
+    if(u.stars < SPIN_COST){
+      return bot.editMessageText(t.noMoney,{chat_id:id,message_id:mid});
     }
 
-    u.stars--;
+    u.stars -= SPIN_COST;
     await bot.editMessageText(t.spinning,{chat_id:id,message_id:mid});
+
     await new Promise(r=>setTimeout(r,1000));
 
-    let text;
-    if(Math.random()<0.6){
-      text=t.lose;
-    }else{
-      let w=Math.floor(Math.random()*5)+1;
-      u.stars+=w;
-      text=t.win(w);
+    let win = spin();
+
+    if(win>0){
+      u.stars += win;
+      await saveUser(id,u);
+      return bot.editMessageText(`${t.win(win)}\n⭐ ${u.stars}`,{chat_id:id,message_id:mid});
+    } else {
+      await saveUser(id,u);
+      return bot.editMessageText(`${t.lose}\n⭐ ${u.stars}`,{chat_id:id,message_id:mid});
     }
-
-    await saveUser(id,u);
-
-    return bot.editMessageText(`${text}\n\n⭐ ${u.stars}`,{
-      chat_id:id,
-      message_id:mid,
-      reply_markup:{inline_keyboard:[[{text:"🔙",callback_data:"menu"}]]}
-    });
   }
 
   // BALANCE
   if(data==="balance"){
-    return bot.editMessageText(`⭐ ${u.stars}\n👥 ${u.refs}`,{
-      chat_id:id,
-      message_id:mid,
-      reply_markup:{inline_keyboard:[[{text:"🔙",callback_data:"menu"}]]}
-    });
+    return bot.editMessageText(`⭐ ${u.stars}\n👥 ${u.refs}`,{chat_id:id,message_id:mid});
   }
 
   // BUY
   if(data==="buy"){
-    u.waiting = true;
+    u.waiting=true;
     await saveUser(id,u);
-
-    return bot.editMessageText(t.ask,{
-      chat_id:id,
-      message_id:mid,
-      reply_markup:{inline_keyboard:[[{text:"🔙",callback_data:"menu"}]]}
-    });
+    return bot.editMessageText(t.ask,{chat_id:id,message_id:mid});
   }
 
   // REF
   if(data==="ref"){
     const link = `https://t.me/${process.env.BOT_USERNAME}?start=${id}`;
-
-    return bot.editMessageText(
-`${t.ref}
-
-${link}
-
-👥 ${u.refs}`,
-    {
-      chat_id:id,
-      message_id:mid,
-      reply_markup:{inline_keyboard:[[{text:"🔙",callback_data:"menu"}]]}
-    });
+    return bot.editMessageText(`${link}\n👥 ${u.refs}`,{chat_id:id,message_id:mid});
   }
 
-  // WITHDRAW MENU
+  // WITHDRAW
   if(data==="withdraw"){
-    return bot.editMessageText(t.withdrawMenu,{
+    return bot.editMessageText("💸",{
       chat_id:id,
       message_id:mid,
       reply_markup:{
         inline_keyboard:[
-          [15,25,50].map(a=>({text:`${a}⭐`,callback_data:`w_${a}`})),
-          [100,350,500].map(a=>({text:`${a}⭐`,callback_data:`w_${a}`})),
-          [650,1000].map(a=>({text:`${a}⭐`,callback_data:`w_${a}`})),
-          [{text:"🔙",callback_data:"menu"}]
+          [15,25,50].map(a=>({text:`${a}`,callback_data:`w_${a}`})),
+          [100,350,500].map(a=>({text:`${a}`,callback_data:`w_${a}`})),
+          [650,1000].map(a=>({text:`${a}`,callback_data:`w_${a}`}))
         ]
       }
     });
   }
 
-  // CREATE REQUEST
   if(data.startsWith("w_")){
-    const amount=parseInt(data.split("_")[1]);
+    let amount = parseInt(data.split("_")[1]);
 
-    if(u.stars<amount){
+    if(u.stars < amount){
       return bot.answerCallbackQuery(q.id,{text:"❌"});
     }
 
-    u.stars-=amount;
+    u.stars -= amount;
     await saveUser(id,u);
 
-    let idReq = await redis.incr("withdraw_counter");
+    let idReq = await redis.incr("withdraw_id");
 
-    let now=new Date();
-    let time=now.toLocaleTimeString();
-    let date=now.toLocaleDateString();
-
-    let list=await redis.get(`req_${id}`)||[];
-    list.push({id:idReq,amount,date,time});
+    let list = await redis.get(`req_${id}`)||[];
+    list.push({id:idReq,amount});
     await redis.set(`req_${id}`,list);
 
-    await bot.editMessageText(
-      t.request(idReq,amount,date,time),
-      {
-        chat_id:id,
-        message_id:mid,
-        reply_markup:{inline_keyboard:[[{text:"🔙",callback_data:"menu"}]]}
-      }
-    );
+    bot.sendMessage(ADMIN_ID,`NEW WITHDRAW\n#${idReq}\n@${q.from.username}\n${amount}⭐`);
 
-    bot.sendMessage(ADMIN_ID,
-`🔥 WITHDRAW
-#${idReq}
-@${q.from.username || "no_username"}
-${amount}⭐
-${date} ${time}`);
+    return bot.editMessageText(`#${idReq}\n${amount}⭐`,{chat_id:id,message_id:mid});
   }
 
-  // MY REQUESTS
+  // MY
   if(data==="my"){
-    let list=await redis.get(`req_${id}`)||[];
+    let list = await redis.get(`req_${id}`)||[];
+    let text = list.length?list.map(r=>`#${r.id} ${r.amount}`).join("\n"):"❌";
+    return bot.editMessageText(text,{chat_id:id,message_id:mid});
+  }
 
-    let text=list.length
-      ? list.map(r=>`#${r.id} ${r.amount}⭐`).join("\n")
-      : "❌";
+  // LANG
+  if(data==="lang"){
+    return bot.editMessageText("🌍",{chat_id:id,message_id:mid,reply_markup:langMenu().reply_markup});
+  }
 
-    return bot.editMessageText(text,{
-      chat_id:id,
-      message_id:mid,
-      reply_markup:{inline_keyboard:[[{text:"🔙",callback_data:"menu"}]]}
-    });
+  if(data.startsWith("lang_")){
+    u.lang = data.split("_")[1];
+    await saveUser(id,u);
+    return bot.editMessageText(menu(u).text,{chat_id:id,message_id:mid,reply_markup:menu(u).reply_markup});
   }
 
   // MENU
   if(data==="menu"){
-    const m=menu(u);
-    return bot.editMessageText(m.text,{
-      chat_id:id,
-      message_id:mid,
-      reply_markup:m.reply_markup
-    });
+    return bot.editMessageText(menu(u).text,{chat_id:id,message_id:mid,reply_markup:menu(u).reply_markup});
   }
+
 });
 
 // WEBHOOK
