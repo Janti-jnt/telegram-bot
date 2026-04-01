@@ -58,14 +58,14 @@ async function getUser(id){
 async function saveUser(id,data){
   await redis.set(`user:${id}`, data);
 
-  // ✅ DOĞRU leaderboard kayıt
+  // ✅ leaderboard fix
   await redis.zadd("leaderboard", data.stars, id.toString());
 }
 
 // TEXTS
 const texts = {
   tr:{menu:"🎰 Menü",play:"🎮 Oyna (50⭐)",balance:"⭐ Bakiye",buy:"💰 Yükle",ref:"👥 Davet",withdraw:"💸 Çek",my:"📄 Taleplerim",top:"🏆 Liderler",lang:"🌍 Dil",noMoney:"❌ Yetersiz bakiye",spinning:"🎰 Çark dönüyor...",lose:"😢 Kaybettin",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"},
-  en:{menu:"🎰 Menu",play:"🎮 Play (50⭐)",balance:"⭐ Balance",buy:"💰 Deposit",ref:"👥 Invite",withdraw:"💸 Withdraw",my:"📄 My requests",top:"🏆 Leaderboard",lang:"🌍 Language",noMoney:"❌ Not enough balance",spinning:"🎰 Spinning...",lose:"😢 Lost",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"},
+  en:{menu:"🎰 Menu",play:"🎮 Play (50⭐)",balance:"⭐ Balance",buy:"💰 Deposit",ref:"👥 Invite",withdraw:"💸 Withdraw",my:"📄 Requests",top:"🏆 Leaderboard",lang:"🌍 Language",noMoney:"❌ Not enough balance",spinning:"🎰 Spinning...",lose:"😢 Lost",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"},
   ru:{menu:"🎰 Меню",play:"🎮 Играть (50⭐)",balance:"⭐ Баланс",buy:"💰 Пополнить",ref:"👥 Пригласить",withdraw:"💸 Вывод",my:"📄 Мои заявки",top:"🏆 Топ",lang:"🌍 Язык",noMoney:"❌ Недостаточно средств",spinning:"🎰 Крутится...",lose:"😢 Проигрыш",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"}
 };
 
@@ -146,8 +146,6 @@ bot.on("message", async (msg)=>{
 
 // CALLBACKS
 bot.on("callback_query", async (q)=>{
-
-  // 🔥 callback fix
   try{ await bot.answerCallbackQuery(q.id); }catch(e){}
 
   const id = q.message.chat.id;
@@ -159,44 +157,67 @@ bot.on("callback_query", async (q)=>{
 
   const t = texts[u.lang];
 
+  // 🎮 PLAY (FIXED)
   if(data==="play"){
     if(u.stars < SPIN_COST){
-      return bot.editMessageText(t.noMoney,{chat_id:id,message_id:mid,reply_markup:backBtn()});
+      return bot.editMessageText(t.noMoney,{
+        chat_id:id,
+        message_id:mid,
+        reply_markup:backBtn()
+      });
     }
 
     u.stars -= SPIN_COST;
-    await bot.editMessageText(t.spinning,{chat_id:id,message_id:mid});
+    await saveUser(id,u);
 
-    setTimeout(async ()=>{
-      let win = spin();
-      if(win>0) u.stars += win;
+    await bot.editMessageText(t.spinning,{
+      chat_id:id,
+      message_id:mid
+    });
 
-      await saveUser(id,u);
+    await new Promise(r => setTimeout(r, 800));
 
-      bot.editMessageText(
-        win>0 ? `${t.win(win)}\n⭐ ${u.stars}` : `${t.lose}\n⭐ ${u.stars}`,
-        {chat_id:id,message_id:mid,reply_markup:backBtn()}
-      );
-    },800);
+    let win = spin();
 
-    return;
+    if(win > 0){
+      u.stars += win;
+    }
+
+    await saveUser(id,u);
+
+    return bot.editMessageText(
+      win > 0 
+        ? `${t.win(win)}\n⭐ ${u.stars}` 
+        : `${t.lose}\n⭐ ${u.stars}`,
+      {
+        chat_id:id,
+        message_id:mid,
+        reply_markup:backBtn()
+      }
+    );
   }
 
+  // BALANCE
   if(data==="balance"){
-    return bot.editMessageText(`⭐ ${u.stars}\n👥 ${u.refs}`,{chat_id:id,message_id:mid,reply_markup:backBtn()});
+    return bot.editMessageText(`⭐ ${u.stars}\n👥 ${u.refs}`,{
+      chat_id:id,message_id:mid,reply_markup:backBtn()
+    });
   }
 
+  // BUY
   if(data==="buy"){
     u.waiting=true;
     await saveUser(id,u);
     return bot.editMessageText(t.ask,{chat_id:id,message_id:mid,reply_markup:backBtn()});
   }
 
+  // REF
   if(data==="ref"){
     const link = `https://t.me/${process.env.BOT_USERNAME}?start=${id}`;
     return bot.editMessageText(`${link}\n👥 ${u.refs}`,{chat_id:id,message_id:mid,reply_markup:backBtn()});
   }
 
+  // LEADERBOARD
   if(data==="top"){
     let top = await redis.zrange("leaderboard", 0, 9, { rev: true });
 
@@ -212,10 +233,14 @@ bot.on("callback_query", async (q)=>{
     return bot.editMessageText(text,{chat_id:id,message_id:mid,reply_markup:backBtn()});
   }
 
+  // MENU
   if(data==="menu"){
-    return bot.editMessageText(menu(u).text,{chat_id:id,message_id:mid,reply_markup:menu(u).reply_markup});
+    return bot.editMessageText(menu(u).text,{
+      chat_id:id,message_id:mid,reply_markup:menu(u).reply_markup
+    });
   }
 
+  // LANG
   if(data==="lang"){
     return bot.editMessageText("🌍",{chat_id:id,message_id:mid,reply_markup:langMenu().reply_markup});
   }
