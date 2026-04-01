@@ -6,6 +6,8 @@ const bot = new TelegramBot(process.env.BOT_TOKEN);
 const app = express();
 app.use(express.json());
 
+const ADMIN_ID = process.env.ADMIN_ID;
+
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
@@ -13,7 +15,6 @@ const redis = new Redis({
 
 const SPIN_COST = 50;
 
-// 🎯 REWARDS
 const rewards = [
   {amount:5, chance:26},
   {amount:10, chance:14},
@@ -58,7 +59,6 @@ async function getUser(id){
 async function saveUser(id,data){
   await redis.set(`user:${id}`, data);
 
-  // ✅ UPSTASH DOĞRU leaderboard
   await redis.zadd("leaderboard", {
     score: data.stars,
     member: id.toString()
@@ -67,54 +67,9 @@ async function saveUser(id,data){
 
 // TEXTS
 const texts = {
-  tr:{
-    menu:"🎰 Menü",
-    play:"🎮 Oyna (50⭐)",
-    balance:"⭐ Bakiye",
-    buy:"💰 Yükle",
-    ref:"👥 Davet",
-    withdraw:"💸 Çek",
-    my:"📄 Taleplerim",
-    top:"🏆 Liderler",
-    lang:"🌍 Dil",
-    noMoney:"❌ Yetersiz bakiye",
-    spinning:"🎰 Çark dönüyor...",
-    lose:"😢 Kaybettin",
-    win:(x)=>`🎉 +${x}⭐`,
-    ask:"💰 (25-10000)"
-  },
-  en:{
-    menu:"🎰 Menu",
-    play:"🎮 Play (50⭐)",
-    balance:"⭐ Balance",
-    buy:"💰 Deposit",
-    ref:"👥 Invite",
-    withdraw:"💸 Withdraw",
-    my:"📄 Requests",
-    top:"🏆 Leaderboard",
-    lang:"🌍 Language",
-    noMoney:"❌ Not enough balance",
-    spinning:"🎰 Spinning...",
-    lose:"😢 Lost",
-    win:(x)=>`🎉 +${x}⭐`,
-    ask:"💰 (25-10000)"
-  },
-  ru:{
-    menu:"🎰 Меню",
-    play:"🎮 Играть (50⭐)",
-    balance:"⭐ Баланс",
-    buy:"💰 Пополнить",
-    ref:"👥 Пригласить",
-    withdraw:"💸 Вывод",
-    my:"📄 Заявки",
-    top:"🏆 Топ",
-    lang:"🌍 Язык",
-    noMoney:"❌ Недостаточно средств",
-    spinning:"🎰 Крутится...",
-    lose:"😢 Проигрыш",
-    win:(x)=>`🎉 +${x}⭐`,
-    ask:"💰 (25-10000)"
-  }
+  tr:{menu:"🎰 Menü",play:"🎮 Oyna (50⭐)",balance:"⭐ Bakiye",buy:"💰 Yükle",ref:"👥 Davet",withdraw:"💸 Çek",my:"📄 Taleplerim",top:"🏆 Liderler",lang:"🌍 Dil",noMoney:"❌ Yetersiz bakiye",spinning:"🎰 Çark dönüyor...",lose:"😢 Kaybettin",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"},
+  en:{menu:"🎰 Menu",play:"🎮 Play (50⭐)",balance:"⭐ Balance",buy:"💰 Deposit",ref:"👥 Invite",withdraw:"💸 Withdraw",my:"📄 Requests",top:"🏆 Leaderboard",lang:"🌍 Language",noMoney:"❌ Not enough balance",spinning:"🎰 Spinning...",lose:"😢 Lost",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"},
+  ru:{menu:"🎰 Меню",play:"🎮 Играть (50⭐)",balance:"⭐ Баланс",buy:"💰 Пополнить",ref:"👥 Пригласить",withdraw:"💸 Вывод",my:"📄 Мои заявки",top:"🏆 Топ",lang:"🌍 Язык",noMoney:"❌ Недостаточно средств",spinning:"🎰 Крутится...",lose:"😢 Проигрыш",win:(x)=>`🎉 +${x}⭐`,ask:"💰 (25-10000)"}
 };
 
 // MENU
@@ -143,53 +98,17 @@ function menu(u){
   };
 }
 
-// LANG MENU
-function langMenu(){
-  return {
-    reply_markup:{
-      inline_keyboard:[
-        [{text:"🇹🇷 TR",callback_data:"lang_tr"}],
-        [{text:"🇬🇧 EN",callback_data:"lang_en"}],
-        [{text:"🇷🇺 RU",callback_data:"lang_ru"}]
-      ]
-    }
-  };
-}
-
 // START
 bot.onText(/\/start/, async (msg)=>{
   const id = msg.chat.id;
   let u = await getUser(id);
 
   if(!u){
-    u = {stars:100,refs:0,lang:null};
+    u = {stars:100,refs:0,lang:"tr"};
     await saveUser(id,u);
-  }
-
-  if(!u.lang){
-    return bot.sendMessage(id,"🌍 Dil seç / Choose language",langMenu());
   }
 
   bot.sendMessage(id,menu(u).text,{reply_markup:menu(u).reply_markup});
-});
-
-// BUY INPUT
-bot.on("message", async (msg)=>{
-  const id = msg.chat.id;
-  let u = await getUser(id);
-  if(!u || !u.waiting) return;
-
-  let n = parseInt(msg.text);
-
-  if(n>=25 && n<=10000){
-    u.stars += n;
-    u.waiting = false;
-    await saveUser(id,u);
-
-    return bot.sendMessage(id,`✅ +${n}⭐`,{
-      reply_markup:menu(u).reply_markup
-    });
-  }
 });
 
 // CALLBACKS
@@ -205,25 +124,18 @@ bot.on("callback_query", async (q)=>{
 
   const t = texts[u.lang];
 
-  // PLAY
+  // 🎮 PLAY
   if(data==="play"){
     if(u.stars < SPIN_COST){
-      return bot.editMessageText(t.noMoney,{
-        chat_id:id,
-        message_id:mid,
-        reply_markup:backBtn()
-      });
+      return bot.editMessageText(t.noMoney,{chat_id:id,message_id:mid,reply_markup:backBtn()});
     }
 
     u.stars -= SPIN_COST;
     await saveUser(id,u);
 
-    await bot.editMessageText(t.spinning,{
-      chat_id:id,
-      message_id:mid
-    });
+    await bot.editMessageText(t.spinning,{chat_id:id,message_id:mid});
 
-    await new Promise(r => setTimeout(r, 1000));
+    await new Promise(r=>setTimeout(r,1000));
 
     let win = spin();
 
@@ -235,96 +147,90 @@ bot.on("callback_query", async (q)=>{
 
     return bot.editMessageText(
       win>0 ? `${t.win(win)}\n⭐ ${u.stars}` : `${t.lose}\n⭐ ${u.stars}`,
-      {
-        chat_id:id,
-        message_id:mid,
-        reply_markup:backBtn()
-      }
+      {chat_id:id,message_id:mid,reply_markup:backBtn()}
     );
   }
 
-  // BALANCE
-  if(data==="balance"){
-    return bot.editMessageText(`⭐ ${u.stars}\n👥 ${u.refs}`,{
+  // 💸 WITHDRAW
+  if(data==="withdraw"){
+    return bot.editMessageText("💸 Seç:",{
       chat_id:id,
       message_id:mid,
-      reply_markup:backBtn()
+      reply_markup:{
+        inline_keyboard:[
+          [15,25,50].map(x=>({text:x+"⭐",callback_data:"w_"+x})),
+          [100,350,500].map(x=>({text:x+"⭐",callback_data:"w_"+x})),
+          [650,1000].map(x=>({text:x+"⭐",callback_data:"w_"+x})),
+          [{text:"🔙",callback_data:"menu"}]
+        ]
+      }
     });
   }
 
-  // BUY
-  if(data==="buy"){
-    u.waiting = true;
+  // 💥 REQUEST CREATE
+  if(data.startsWith("w_")){
+    let amount = parseInt(data.split("_")[1]);
+
+    if(u.stars < amount){
+      return bot.editMessageText("❌",{
+        chat_id:id,message_id:mid,reply_markup:backBtn()
+      });
+    }
+
+    u.stars -= amount;
     await saveUser(id,u);
 
-    return bot.editMessageText(t.ask,{
-      chat_id:id,
-      message_id:mid,
-      reply_markup:backBtn()
+    let idCounter = await redis.incr("req_id");
+
+    let req = {
+      id:idCounter,
+      amount:amount,
+      date:new Date().toLocaleString()
+    };
+
+    let list = await redis.get(`req_${id}`) || [];
+    list.push(req);
+    await redis.set(`req_${id}`, list);
+
+    // ADMIN BİLDİRİM
+    bot.sendMessage(ADMIN_ID,`Yeni çekim!\nID:${id}\n${amount}⭐`);
+
+    return bot.editMessageText(`✅ Talep #${idCounter}`,{
+      chat_id:id,message_id:mid,reply_markup:backBtn()
     });
   }
 
-  // REF
-  if(data==="ref"){
-    const link = `https://t.me/${process.env.BOT_USERNAME}?start=${id}`;
+  // 📄 MY REQUESTS
+  if(data==="my"){
+    let list = await redis.get(`req_${id}`) || [];
 
-    return bot.editMessageText(`${link}\n👥 ${u.refs}`,{
-      chat_id:id,
-      message_id:mid,
-      reply_markup:backBtn()
-    });
-  }
+    if(!list.length){
+      return bot.editMessageText("❌",{
+        chat_id:id,message_id:mid,reply_markup:backBtn()
+      });
+    }
 
-  // LEADERBOARD
-  if(data==="top"){
-    let top = await redis.zrange("leaderboard", 0, 9, { rev: true });
+    let text = "";
 
-    let text = t.top + "\n\n";
-
-    for(let i=0;i<top.length;i++){
-      let uid = top[i];
-      let user = await getUser(uid);
-      text += `${i+1}. ${uid} - ⭐ ${user?.stars || 0}\n`;
+    for(let r of list){
+      text += `#${r.id} - ${r.amount}⭐\n`;
     }
 
     return bot.editMessageText(text,{
-      chat_id:id,
-      message_id:mid,
-      reply_markup:backBtn()
+      chat_id:id,message_id:mid,reply_markup:backBtn()
     });
   }
 
   // MENU
   if(data==="menu"){
     return bot.editMessageText(menu(u).text,{
-      chat_id:id,
-      message_id:mid,
-      reply_markup:menu(u).reply_markup
+      chat_id:id,message_id:mid,reply_markup:menu(u).reply_markup
     });
   }
 
-  // LANG
-  if(data==="lang"){
-    return bot.editMessageText("🌍",{
-      chat_id:id,
-      message_id:mid,
-      reply_markup:langMenu().reply_markup
-    });
-  }
-
-  if(data.startsWith("lang_")){
-    u.lang = data.split("_")[1];
-    await saveUser(id,u);
-
-    return bot.editMessageText(menu(u).text,{
-      chat_id:id,
-      message_id:mid,
-      reply_markup:menu(u).reply_markup
-    });
-  }
 });
 
-// SERVER (RENDER FIX)
+// SERVER
 const PORT = process.env.PORT || 3000;
 
 app.post(`/bot${process.env.BOT_TOKEN}`, (req,res)=>{
@@ -332,10 +238,8 @@ app.post(`/bot${process.env.BOT_TOKEN}`, (req,res)=>{
   res.sendStatus(200);
 });
 
-app.get("/", (req,res)=>{
-  res.send("Bot is alive");
-});
+app.get("/", (req,res)=>res.send("OK"));
 
 app.listen(PORT, ()=>{
-  console.log("Server running on port " + PORT);
+  console.log("Server running " + PORT);
 });
