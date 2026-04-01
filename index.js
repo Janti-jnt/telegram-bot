@@ -40,13 +40,14 @@ const texts = {
     ref:"👥 Davet",
     withdraw:"💸 Çek",
     my:"📄 Taleplerim",
+    lang:"🌍 Dil",
     withdrawMenu:"💸 Miktar seç",
     noMoney:"❌ Yetersiz bakiye",
     spinning:"🎰 Çark dönüyor...",
     lose:"😢 Kaybettin",
     win:(x)=>`🎉 +${x}⭐`,
     ask:"(25-10000)",
-    request:(id,a,d,t)=>`Talep #${id}\n${a}⭐\nTarih: ${d} Saat: ${t}\n✅ Onaylandı`
+    request:(id,a,d,t)=>`Talep #${id}\n${a}⭐\n${d} ${t}\n✅ Onaylandı`
   },
   en:{
     menu:"🎰 Menu",
@@ -56,13 +57,14 @@ const texts = {
     ref:"👥 Invite",
     withdraw:"💸 Withdraw",
     my:"📄 Requests",
+    lang:"🌍 Language",
     withdrawMenu:"💸 Choose amount",
     noMoney:"❌ Not enough balance",
     spinning:"🎰 Spinning...",
     lose:"😢 Lost",
     win:(x)=>`🎉 +${x}⭐`,
     ask:"(25-10000)",
-    request:(id,a,d,t)=>`Request #${id}\n${a}⭐\nDate: ${d} Time: ${t}\n✅ Approved`
+    request:(id,a,d,t)=>`Request #${id}\n${a}⭐\n${d} ${t}\n✅ Approved`
   },
   ru:{
     menu:"🎰 Меню",
@@ -72,29 +74,50 @@ const texts = {
     ref:"👥 Пригласить",
     withdraw:"💸 Вывод",
     my:"📄 Мои заявки",
+    lang:"🌍 Язык",
     withdrawMenu:"💸 Выбери сумму",
     noMoney:"❌ Недостаточно средств",
     spinning:"🎰 Крутится...",
     lose:"😢 Проигрыш",
     win:(x)=>`🎉 +${x}⭐`,
     ask:"(25-10000)",
-    request:(id,a,d,t)=>`Заявка #${id}\n${a}⭐\nЧисло: ${d} Время: ${t}\n✅ Одобрено`
+    request:(id,a,d,t)=>`Заявка #${id}\n${a}⭐\n${d} ${t}\n✅ Одобрено`
   }
 };
 
-// MENU
+// MENU (3'LÜ GRID)
 function menu(u){
   const t = texts[u.lang];
   return {
     text:t.menu,
     reply_markup:{
       inline_keyboard:[
-        [{text:t.play,callback_data:"play"}],
-        [{text:t.balance,callback_data:"balance"}],
-        [{text:t.buy,callback_data:"buy"}],
-        [{text:t.ref,callback_data:"ref"}],
-        [{text:t.withdraw,callback_data:"withdraw"}],
-        [{text:t.my,callback_data:"my"}]
+        [
+          {text:t.play,callback_data:"play"},
+          {text:t.balance,callback_data:"balance"},
+          {text:t.buy,callback_data:"buy"}
+        ],
+        [
+          {text:t.ref,callback_data:"ref"},
+          {text:t.withdraw,callback_data:"withdraw"},
+          {text:t.my,callback_data:"my"}
+        ],
+        [
+          {text:t.lang,callback_data:"lang"}
+        ]
+      ]
+    }
+  };
+}
+
+// LANG MENU
+function langMenu(){
+  return {
+    reply_markup:{
+      inline_keyboard:[
+        [{text:"🇹🇷 TR",callback_data:"lang_tr"}],
+        [{text:"🇬🇧 EN",callback_data:"lang_en"}],
+        [{text:"🇷🇺 RU",callback_data:"lang_ru"}]
       ]
     }
   };
@@ -105,31 +128,18 @@ bot.onText(/\/start/, async (msg)=>{
   const id = msg.chat.id;
 
   let u = await getUser(id);
+
   if(!u){
-    u = {stars:50,refs:0,lang:"ru"};
+    u = {stars:50,refs:0,lang:null};
     await saveUser(id,u);
+  }
+
+  if(!u.lang){
+    return bot.sendMessage(id,"🌍",langMenu());
   }
 
   const m = menu(u);
   bot.sendMessage(id,m.text,{reply_markup:m.reply_markup});
-});
-
-// INPUT
-bot.on("message", async (msg)=>{
-  const id = msg.chat.id;
-
-  let u = await getUser(id);
-  if(!u || !u.waiting) return;
-
-  let n = parseInt(msg.text);
-  if(n>=25 && n<=10000){
-    u.stars+=n;
-    u.waiting=false;
-    await saveUser(id,u);
-
-    const m = menu(u);
-    bot.sendMessage(id,`✅ +${n}⭐`,{reply_markup:m.reply_markup});
-  }
 });
 
 // BUTTONS
@@ -145,6 +155,27 @@ bot.on("callback_query", async (q)=>{
 
   const t = texts[u.lang];
 
+  // LANG
+  if(data==="lang"){
+    return bot.editMessageText("🌍",{
+      chat_id:id,
+      message_id:mid,
+      reply_markup:langMenu().reply_markup
+    });
+  }
+
+  if(data.startsWith("lang_")){
+    u.lang = data.split("_")[1];
+    await saveUser(id,u);
+
+    const m = menu(u);
+    return bot.editMessageText(m.text,{
+      chat_id:id,
+      message_id:mid,
+      reply_markup:m.reply_markup
+    });
+  }
+
   // PLAY
   if(data==="play"){
     if(u.stars<=0){
@@ -156,6 +187,7 @@ bot.on("callback_query", async (q)=>{
     }
 
     u.stars--;
+
     await bot.editMessageText(t.spinning,{chat_id:id,message_id:mid});
     await new Promise(r=>setTimeout(r,1000));
 
@@ -186,18 +218,6 @@ bot.on("callback_query", async (q)=>{
     });
   }
 
-  // BUY
-  if(data==="buy"){
-    u.waiting=true;
-    await saveUser(id,u);
-
-    return bot.editMessageText(t.ask,{
-      chat_id:id,
-      message_id:mid,
-      reply_markup:{inline_keyboard:[[{text:"🔙",callback_data:"menu"}]]}
-    });
-  }
-
   // WITHDRAW MENU
   if(data==="withdraw"){
     return bot.editMessageText(t.withdrawMenu,{
@@ -214,7 +234,7 @@ bot.on("callback_query", async (q)=>{
     });
   }
 
-  // CREATE REQUEST
+  // REQUEST
   if(data.startsWith("w_")){
     const amount=parseInt(data.split("_")[1]);
 
@@ -225,7 +245,7 @@ bot.on("callback_query", async (q)=>{
     u.stars-=amount;
     await saveUser(id,u);
 
-    let idReq=await redis.incr("wid");
+    let idReq = await redis.incr("withdraw_counter");
 
     let now=new Date();
     let time=now.toLocaleTimeString();
@@ -245,7 +265,7 @@ bot.on("callback_query", async (q)=>{
     );
 
     bot.sendMessage(ADMIN_ID,
-`🔥 WITHDRAW
+`🔥 NEW WITHDRAW
 #${idReq}
 @${q.from.username || "no_username"}
 ${amount}⭐
