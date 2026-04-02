@@ -22,16 +22,16 @@ const PORT = process.env.PORT || 3000;
 
 /*
   Menu photo.
-  Must be a direct image URL.
+  Direct image URL required.
   You can override it with MENU_PHOTO_URL env var.
 */
 const DEFAULT_MENU_PHOTO_URL = 'https://i.ibb.co/JSLjw7m/B8-D80-FDD-AB82-43-A0-8272-9461-CB1-D932-A.png';
 const MENU_PHOTO_URL = process.env.MENU_PHOTO_URL || DEFAULT_MENU_PHOTO_URL;
 
 /*
-  Group activation.
+  Activation group.
   The bot should be inside this group.
-  For best reliability, make the bot admin in the group.
+  Ideally make the bot admin in the group.
 */
 const DEFAULT_ACTIVATION_GROUP_URL = 'https://t.me/Jantistar_chat';
 const ACTIVATION_GROUP_URL = process.env.ACTIVATION_GROUP_URL || DEFAULT_ACTIVATION_GROUP_URL;
@@ -43,10 +43,12 @@ const redis = new Redis({
 });
 
 const SPIN_COST = 50;
+const TASK_REWARD = 0.45;
+const TASK_WAIT_MS = 4000;
 
-// =========================
+// ======================================================
 // Rewards
-// =========================
+// ======================================================
 const rewards = [
   { amount: 5, chance: 26 },
   { amount: 10, chance: 14 },
@@ -77,9 +79,92 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// =========================
+// ======================================================
+// Tasks
+// ======================================================
+const TASKS = [
+  {
+    id: 1,
+    name: 'rahmetbrobot',
+    url: 'https://t.me/rahmetbrobot?start=_tgr_Qk_L4481NTMy',
+  },
+  {
+    id: 2,
+    name: 'onelinkgo_bot',
+    url: 'https://t.me/onelinkgo_bot?start=_tgr_tEBbQ1lmNWIy',
+  },
+  {
+    id: 3,
+    name: 'bababoba2bot',
+    url: 'https://t.me/bababoba2bot?start=_tgr_BIVFp9BjYzhi',
+  },
+  {
+    id: 4,
+    name: 'peretopzvbot',
+    url: 'https://t.me/peretopzvbot?start=_tgr_lo4LoWthZWIy',
+  },
+  {
+    id: 5,
+    name: 'lastdayzetbot',
+    url: 'https://t.me/lastdayzetbot?start=_tgr_2D2rGHZkYzBi',
+  },
+  {
+    id: 6,
+    name: 'StarsSwapAutoBot',
+    url: 'https://t.me/StarsSwapAutoBot?start=_tgr_Yfyia040MGVi',
+  },
+  {
+    id: 7,
+    name: 'SugarGenBox_bot',
+    url: 'https://t.me/SugarGenBox_bot?start=_tgr_aXqKf55kYzUy',
+  },
+  {
+    id: 8,
+    name: 'ImarketTostar_bot',
+    url: 'https://t.me/ImarketTostar_bot?start=_tgr_AjkkQzsxOWMy',
+  },
+  {
+    id: 9,
+    name: 'BuyVPN_Global_bot',
+    url: 'https://t.me/BuyVPN_Global_bot?start=_tgr_yCNoJnQzOTMy',
+  },
+];
+
+function getTaskIndex(u) {
+  const idx = Number.isInteger(u.task_index) ? u.task_index : 0;
+  if (idx < 0) return 0;
+  return idx;
+}
+
+function currentTask(u) {
+  const idx = getTaskIndex(u);
+  if (idx >= TASKS.length) return null;
+  return TASKS[idx];
+}
+
+function isTasksFinished(u) {
+  return getTaskIndex(u) >= TASKS.length;
+}
+
+function advanceTask(u) {
+  u.task_index = getTaskIndex(u) + 1;
+  u.task_started_at = 0;
+  if (u.task_index >= TASKS.length) {
+    u.task_completed = true;
+  }
+  return u;
+}
+
+function taskTimerRemaining(u) {
+  const started = Number.isFinite(u.task_started_at) ? u.task_started_at : 0;
+  const elapsed = Date.now() - started;
+  const remaining = Math.ceil((TASK_WAIT_MS - elapsed) / 1000);
+  return Math.max(0, remaining);
+}
+
+// ======================================================
 // Keyboard helpers
-// =========================
+// ======================================================
 function backKeyboard() {
   return {
     inline_keyboard: [[{ text: '🔙', callback_data: 'menu' }]],
@@ -102,6 +187,7 @@ function menuKeyboard(u) {
       ],
       [
         { text: t.top, callback_data: 'top' },
+        { text: t.tasks, callback_data: 'tasks' },
         { text: t.lang, callback_data: 'lang' },
       ],
     ],
@@ -114,6 +200,7 @@ function langKeyboard() {
       [{ text: '🇹🇷 TR', callback_data: 'lang_tr' }],
       [{ text: '🇬🇧 EN', callback_data: 'lang_en' }],
       [{ text: '🇷🇺 RU', callback_data: 'lang_ru' }],
+      [{ text: '🔙', callback_data: 'menu' }],
     ],
   };
 }
@@ -129,9 +216,29 @@ function withdrawKeyboard() {
   };
 }
 
-// =========================
+function taskKeyboardForUser(u) {
+  const t = texts[u.lang] || texts.tr;
+  const task = currentTask(u);
+
+  if (!task) {
+    return {
+      inline_keyboard: [[{ text: t.taskBack, callback_data: 'menu' }]],
+    };
+  }
+
+  return {
+    inline_keyboard: [
+      [{ text: t.taskOpen, url: task.url }],
+      [{ text: t.taskCheck, callback_data: 'task_check' }],
+      [{ text: t.taskSkip, callback_data: 'task_skip' }],
+      [{ text: t.taskBack, callback_data: 'menu' }],
+    ],
+  };
+}
+
+// ======================================================
 // Activation helpers
-// =========================
+// ======================================================
 function activationJoinKeyboard() {
   return {
     inline_keyboard: [
@@ -170,9 +277,9 @@ async function isUserInActivationGroup(userId) {
   }
 }
 
-// =========================
+// ======================================================
 // Date / name helpers
-// =========================
+// ======================================================
 function nowDateTime() {
   const now = new Date();
   return {
@@ -197,9 +304,9 @@ function displayName(user, id) {
   return String(id);
 }
 
-// =========================
+// ======================================================
 // Hidden image for text screens
-// =========================
+// ======================================================
 const TMP_DIR = '/tmp';
 const HIDDEN_PNG_PATH = path.join(TMP_DIR, 'hidden-1x1.png');
 const HIDDEN_PNG_BASE64 =
@@ -217,9 +324,9 @@ try {
   console.error('HIDDEN PNG INIT ERROR:', err);
 }
 
-// =========================
+// ======================================================
 // Safe message helpers
-// =========================
+// ======================================================
 async function safeDelete(chatId, messageId) {
   try {
     await bot.deleteMessage(chatId, String(messageId));
@@ -244,9 +351,9 @@ async function sendMenuCard(chatId, u, prefix = '') {
 }
 
 async function sendTextCard(chatId, text, keyboard) {
-  return bot.sendMessage(chatId, text, {
-    reply_markup: keyboard,
-  });
+  const options = {};
+  if (keyboard) options.reply_markup = keyboard;
+  return bot.sendMessage(chatId, text, options);
 }
 
 async function replaceWithMenu(chatId, messageId, u, prefix = '') {
@@ -271,9 +378,9 @@ async function sendActivationWaiting(chatId) {
   });
 }
 
-// =========================
+// ======================================================
 // User storage
-// =========================
+// ======================================================
 async function getUser(id) {
   let u = await redis.get(`user:${id}`);
   if (!u) return null;
@@ -288,6 +395,9 @@ async function getUser(id) {
   if (typeof u.activated !== 'boolean') u.activated = false;
   if (typeof u.activation_prompted !== 'boolean') u.activation_prompted = false;
   if (!u.activation_token) u.activation_token = null;
+  if (!Number.isInteger(u.task_index)) u.task_index = 0;
+  if (!Number.isFinite(u.task_started_at)) u.task_started_at = 0;
+  if (typeof u.task_completed !== 'boolean') u.task_completed = false;
 
   return u;
 }
@@ -301,9 +411,9 @@ async function saveUser(id, data) {
   });
 }
 
-// =========================
+// ======================================================
 // Request storage
-// =========================
+// ======================================================
 async function getRequests(id) {
   const r = await redis.get(`req_${id}`);
   return r || [];
@@ -315,9 +425,9 @@ async function saveRequest(id, data) {
   await redis.set(`req_${id}`, list);
 }
 
-// =========================
+// ======================================================
 // Texts
-// =========================
+// ======================================================
 const texts = {
   tr: {
     menu: '🎰 Menü',
@@ -328,6 +438,7 @@ const texts = {
     withdraw: '💸 Çek',
     my: '📄 Taleplerim',
     top: '🏆 Liderler',
+    tasks: '🧩 Görevler',
     lang: '🌍 Dil',
     withdrawMenu: '💸 Çekim miktarı seç',
     noMoney: '❌ Yetersiz bakiye',
@@ -338,7 +449,30 @@ const texts = {
     requestPending: '⏳ Bekleniyor',
     myEmpty: '❌ Henüz talep yok',
     topEmpty: '❌ Liste boş',
+
+    taskTitle: 'Görev',
+    taskOpen: '🚀 Botu Aç',
+    taskCheck: '✅ Kontrol Et',
+    taskSkip: '⏭ Görevi Geç',
+    taskBack: '🔙 Geri',
+    taskReward: 'Ödül',
+    taskTimer: 'Sayaç',
+    taskInstruction1: 'Görev botunu aç',
+    taskInstruction2: '4 saniye bekle',
+    taskInstruction3: 'Sonra kontrol et',
+    taskWait4: '⏳ 4 saniye bekle',
+    taskReady: '✅ Artık kontrol edebilirsin',
+    taskComplete: '🎉 Görev tamamlandı',
+    taskSkipped: '⏭ Görev geçildi',
+    taskCount: (i, total) => `Görev ${i}/${total}`,
+    taskIntro: 'Aşağıdaki botlardan birini aç, 4 saniye bekle ve sonra kontrol et.',
+    taskNote: 'Not: Bu sistem timer bazlıdır.',
+    taskNoMore: 'Görev listesi sona erdi',
+    taskFinished: '✅ Tüm görevler tamamlandı',
+    taskNoTask: '❌ Görev kalmadı',
+    taskCurrent: 'Şu anki görev',
   },
+
   en: {
     menu: '🎰 Menu',
     play: '🎮 Play (50⭐)',
@@ -348,6 +482,7 @@ const texts = {
     withdraw: '💸 Withdraw',
     my: '📄 My requests',
     top: '🏆 Leaderboard',
+    tasks: '🧩 Tasks',
     lang: '🌍 Language',
     withdrawMenu: '💸 Choose withdraw amount',
     noMoney: '❌ Not enough balance',
@@ -358,7 +493,30 @@ const texts = {
     requestPending: '⏳ Pending',
     myEmpty: '❌ No requests yet',
     topEmpty: '❌ Leaderboard is empty',
+
+    taskTitle: 'Task',
+    taskOpen: '🚀 Open Bot',
+    taskCheck: '✅ Check',
+    taskSkip: '⏭ Skip',
+    taskBack: '🔙 Back',
+    taskReward: 'Reward',
+    taskTimer: 'Timer',
+    taskInstruction1: 'Open the task bot',
+    taskInstruction2: 'Wait 4 seconds',
+    taskInstruction3: 'Then press check',
+    taskWait4: '⏳ Wait 4 seconds',
+    taskReady: '✅ You can check now',
+    taskComplete: '🎉 Task completed',
+    taskSkipped: '⏭ Task skipped',
+    taskCount: (i, total) => `Task ${i}/${total}`,
+    taskIntro: 'Open one of the bots below, wait 4 seconds, then check.',
+    taskNote: 'Note: This system is timer-based.',
+    taskNoMore: 'No more tasks left',
+    taskFinished: '✅ All tasks completed',
+    taskNoTask: '❌ No task left',
+    taskCurrent: 'Current task',
   },
+
   ru: {
     menu: '🎰 Меню',
     play: '🎮 Играть (50⭐)',
@@ -368,6 +526,7 @@ const texts = {
     withdraw: '💸 Вывод',
     my: '📄 Мои заявки',
     top: '🏆 Топ',
+    tasks: '🧩 Задания',
     lang: '🌍 Язык',
     withdrawMenu: '💸 Выбери сумму вывода',
     noMoney: '❌ Недостаточно средств',
@@ -378,12 +537,104 @@ const texts = {
     requestPending: '⏳ В ожидании',
     myEmpty: '❌ Заявок пока нет',
     topEmpty: '❌ Топ пуст',
+
+    taskTitle: 'Задание',
+    taskOpen: '🚀 Открыть бот',
+    taskCheck: '✅ Проверить',
+    taskSkip: '⏭ Пропустить',
+    taskBack: '🔙 Назад',
+    taskReward: 'Награда',
+    taskTimer: 'Таймер',
+    taskInstruction1: 'Открой бота задания',
+    taskInstruction2: 'Подожди 4 секунды',
+    taskInstruction3: 'Потом нажми проверку',
+    taskWait4: '⏳ Подожди 4 секунды',
+    taskReady: '✅ Теперь можно проверять',
+    taskComplete: '🎉 Задание выполнено',
+    taskSkipped: '⏭ Задание пропущено',
+    taskCount: (i, total) => `Задание ${i}/${total}`,
+    taskIntro: 'Открой одного из ботов ниже, подожди 4 секунды, затем проверь.',
+    taskNote: 'Примечание: система работает по таймеру.',
+    taskNoMore: 'Задания закончились',
+    taskFinished: '✅ Все задания выполнены',
+    taskNoTask: '❌ Заданий не осталось',
+    taskCurrent: 'Текущее задание',
   },
 };
 
-// =========================
+// ======================================================
+// Task screen text / keyboard
+// ======================================================
+function taskScreenText(u) {
+  const t = texts[u.lang] || texts.tr;
+  const task = currentTask(u);
+  const idx = getTaskIndex(u) + 1;
+  const total = TASKS.length;
+
+  if (!task) {
+    const lines = [
+      `🧩 ${t.taskTitle}`,
+      '',
+      t.taskFinished,
+      '',
+      t.taskNoTask,
+      '',
+      t.taskNoMore,
+    ];
+    return lines.join('\n');
+  }
+
+  const lines = [
+    `🧩 ${t.taskTitle}`,
+    '',
+    t.taskCount(idx, total),
+    `Bot: ${task.name}`,
+    `${t.taskReward}: ${TASK_REWARD}⭐`,
+    '',
+    t.taskIntro,
+    `1) ${t.taskInstruction1}`,
+    `2) ${t.taskInstruction2}`,
+    `3) ${t.taskInstruction3}`,
+    '',
+    `${t.taskTimer}: 4 sec`,
+    t.taskNote,
+  ];
+
+  return lines.join('\n');
+}
+
+function taskKeyboardForUser(u) {
+  const t = texts[u.lang] || texts.tr;
+  const task = currentTask(u);
+
+  if (!task) {
+    return {
+      inline_keyboard: [[{ text: t.taskBack, callback_data: 'menu' }]],
+    };
+  }
+
+  return {
+    inline_keyboard: [
+      [{ text: t.taskOpen, url: task.url }],
+      [{ text: t.taskCheck, callback_data: 'task_check' }],
+      [{ text: t.taskSkip, callback_data: 'task_skip' }],
+      [{ text: t.taskBack, callback_data: 'menu' }],
+    ],
+  };
+}
+
+async function sendTaskScreen(chatId, u, prefix = '') {
+  if (!u.task_started_at) {
+    u.task_started_at = Date.now();
+    await saveUser(chatId, u);
+  }
+
+  return sendTextCard(chatId, `${prefix}${taskScreenText(u)}`, taskKeyboardForUser(u));
+}
+
+// ======================================================
 // /start
-// =========================
+// ======================================================
 bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
   try {
     const id = msg.chat.id;
@@ -406,6 +657,9 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
         activated: false,
         activation_prompted: false,
         activation_token: `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+        task_index: 0,
+        task_started_at: 0,
+        task_completed: false,
       };
 
       await saveUser(id, u);
@@ -426,10 +680,12 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
       if (!u.activation_token) {
         u.activation_token = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
       }
+      if (!Number.isInteger(u.task_index)) u.task_index = 0;
+      if (!Number.isFinite(u.task_started_at)) u.task_started_at = 0;
+      if (typeof u.task_completed !== 'boolean') u.task_completed = false;
       await saveUser(id, u);
     }
 
-    // Ask only once. After that, never ask again.
     if (!u.activated) {
       if (!u.activation_prompted) {
         u.activation_prompted = true;
@@ -446,16 +702,15 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
   }
 });
 
-// =========================
+// ======================================================
 // Message handler
-// =========================
+// ======================================================
 bot.on('message', async (msg) => {
   try {
     const id = msg.chat.id;
     let u = await getUser(id);
     if (!u) return;
 
-    // Keep web_app_data compatibility
     if (msg.web_app_data?.data) {
       let payload = null;
       try {
@@ -481,7 +736,6 @@ bot.on('message', async (msg) => {
 
     const text = (msg.text || '').trim();
     if (!u.waiting) return;
-
     if (text.startsWith('/')) return;
     if (!/^\d+$/.test(text)) return;
 
@@ -499,9 +753,9 @@ bot.on('message', async (msg) => {
   }
 });
 
-// =========================
+// ======================================================
 // Callback handler
-// =========================
+// ======================================================
 bot.on('callback_query', async (q) => {
   try {
     await bot.answerCallbackQuery(q.id);
@@ -536,6 +790,96 @@ bot.on('callback_query', async (q) => {
       });
     }
 
+    // Tasks entry
+    if (data === 'tasks') {
+      if (!u.activated) {
+        return bot.answerCallbackQuery(q.id, {
+          text: 'Activate first.',
+          show_alert: true,
+        });
+      }
+
+      return replaceWithText(id, mid, taskScreenText(u), taskKeyboardForUser(u));
+    }
+
+    // Task check
+    if (data === 'task_check') {
+      if (!u.activated) {
+        return bot.answerCallbackQuery(q.id, {
+          text: 'Activate first.',
+          show_alert: true,
+        });
+      }
+
+      const task = currentTask(u);
+      if (!task) {
+        return replaceWithText(id, mid, taskScreenText(u), taskKeyboardForUser(u));
+      }
+
+      if (!u.task_started_at) {
+        u.task_started_at = Date.now();
+        await saveUser(id, u);
+
+        return bot.answerCallbackQuery(q.id, {
+          text: t.taskWait4,
+          show_alert: true,
+        });
+      }
+
+      const elapsed = Date.now() - u.task_started_at;
+
+      if (elapsed < TASK_WAIT_MS) {
+        const remaining = Math.ceil((TASK_WAIT_MS - elapsed) / 1000);
+        return bot.answerCallbackQuery(q.id, {
+          text: `${t.taskWait4} (${remaining}s)`,
+          show_alert: true,
+        });
+      }
+
+      u.stars += TASK_REWARD;
+      advanceTask(u);
+      await saveUser(id, u);
+
+      await safeDelete(id, mid);
+
+      if (isTasksFinished(u)) {
+        return sendTextCard(
+          id,
+          `${t.taskComplete}\n+${TASK_REWARD}⭐\n\n${taskScreenText(u)}`,
+          taskKeyboardForUser(u)
+        );
+      }
+
+      const nextText = `${t.taskComplete}\n+${TASK_REWARD}⭐\n\n${taskScreenText(u)}`;
+      return sendTextCard(id, nextText, taskKeyboardForUser(u));
+    }
+
+    // Task skip
+    if (data === 'task_skip') {
+      if (!u.activated) {
+        return bot.answerCallbackQuery(q.id, {
+          text: 'Activate first.',
+          show_alert: true,
+        });
+      }
+
+      const task = currentTask(u);
+      if (!task) {
+        return replaceWithText(id, mid, taskScreenText(u), taskKeyboardForUser(u));
+      }
+
+      advanceTask(u);
+      await saveUser(id, u);
+
+      await safeDelete(id, mid);
+
+      if (isTasksFinished(u)) {
+        return sendTextCard(id, `${t.taskSkipped}\n\n${taskScreenText(u)}`, taskKeyboardForUser(u));
+      }
+
+      return sendTextCard(id, `${t.taskSkipped}\n\n${taskScreenText(u)}`, taskKeyboardForUser(u));
+    }
+
     // PLAY
     if (data === 'play') {
       if (u.stars < SPIN_COST) {
@@ -545,7 +889,6 @@ bot.on('callback_query', async (q) => {
       u.stars -= SPIN_COST;
       await saveUser(id, u);
 
-      // delete current menu and show spinning in a fresh message
       await safeDelete(id, mid);
       const spinMsg = await sendTextCard(id, t.spinning, null);
 
@@ -699,28 +1042,16 @@ bot.on('callback_query', async (q) => {
 
     // MENU
     if (data === 'menu') {
-      if (u.activated) {
-        return replaceWithMenu(id, mid, u);
-      }
-
-      // If somehow a non-activated user reaches back, keep them gated.
-      if (!u.activation_prompted) {
-        u.activation_prompted = true;
-        await saveUser(id, u);
-        await safeDelete(id, mid);
-        return sendActivationPrompt(id);
-      }
-
-      return sendActivationWaiting(id);
+      return replaceWithMenu(id, mid, u);
     }
   } catch (err) {
     console.error('CALLBACK ERROR:', err);
   }
 });
 
-// =========================
+// ======================================================
 // Server
-// =========================
+// ======================================================
 app.post(`/bot${process.env.BOT_TOKEN}`, (req, res) => {
   bot.processUpdate(req.body);
   res.sendStatus(200);
