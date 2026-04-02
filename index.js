@@ -30,12 +30,13 @@ const DEFAULT_MENU_PHOTO_URL = 'https://i.ibb.co/JSLjw7m/B8-D80-FDD-AB82-43-A0-8
 const MENU_PHOTO_URL = process.env.MENU_PHOTO_URL || DEFAULT_MENU_PHOTO_URL;
 
 /*
-  Aktivasyon mini app linki:
-  İstersen env ile değiştirebilirsin:
-  ACTIVATION_MINIAPP_URL
+  Aktivasyon grubu:
+  Varsayılan olarak senin verdiğin grup linkini kullanır.
+  Botun bu grupta olması ve ideal olarak admin olması gerekir.
 */
-const DEFAULT_ACTIVATION_MINIAPP_URL = 'https://t.me/GorillaCaseBot/app?startapp=r_7190373299';
-const ACTIVATION_MINIAPP_URL = process.env.ACTIVATION_MINIAPP_URL || DEFAULT_ACTIVATION_MINIAPP_URL;
+const DEFAULT_ACTIVATION_GROUP_URL = 'https://t.me/Jantistar_chat';
+const ACTIVATION_GROUP_URL = process.env.ACTIVATION_GROUP_URL || DEFAULT_ACTIVATION_GROUP_URL;
+const ACTIVATION_GROUP_CHAT_ID = process.env.ACTIVATION_GROUP_CHAT_ID || '@Jantistar_chat';
 
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
@@ -118,36 +119,6 @@ function withdrawKeyboard() {
   };
 }
 
-function buildActivationUrl(token) {
-  const base = ACTIVATION_MINIAPP_URL;
-
-  if (!token) return base;
-
-  if (base.includes('startapp=')) {
-    return base.replace(/startapp=([^&]+)/, `startapp=${encodeURIComponent(token)}`);
-  }
-
-  const sep = base.includes('?') ? '&' : '?';
-  return `${base}${sep}startapp=${encodeURIComponent(token)}`;
-}
-
-function activationKeyboardFull(token) {
-  return {
-    inline_keyboard: [
-      [{ text: '🚀 Mini App Aç', url: buildActivationUrl(token) }],
-      [{ text: '✅ Kontrol Et', callback_data: 'check_activation' }],
-    ],
-  };
-}
-
-function activationKeyboardCheckOnly() {
-  return {
-    inline_keyboard: [
-      [{ text: '✅ Kontrol Et', callback_data: 'check_activation' }],
-    ],
-  };
-}
-
 function displayName(user, id) {
   if (!user) return String(id);
 
@@ -172,13 +143,30 @@ function nowDateTime() {
   };
 }
 
+function activationJoinKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: '👥 Gruba Katıl', url: ACTIVATION_GROUP_URL }],
+      [{ text: '✅ Kontrol Et', callback_data: 'check_activation' }],
+    ],
+  };
+}
+
+function activationCheckKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: '✅ Kontrol Et', callback_data: 'check_activation' }],
+    ],
+  };
+}
+
 /* =========================
    HIDDEN PHOTO FOR NON-MENU SCREENS
 ========================= */
 const TMP_DIR = '/tmp';
 const HIDDEN_PNG_PATH = path.join(TMP_DIR, 'hidden-1x1.png');
 const HIDDEN_PNG_BASE64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/w8AAgMBApQn6XcAAAAASUVORK5CYII=';
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAC1HAwCAAC1HAwCAAC0lEQVR42mP8/w8AAgMBApQn6XcAAAAASUVORK5CYII=';
 
 try {
   if (!fs.existsSync(TMP_DIR)) {
@@ -277,17 +265,38 @@ async function replaceWithText(chatId, messageId, text, replyMarkup) {
 }
 
 async function sendActivationPrompt(chatId, u) {
-  const text = 'Botu aktif etmek için mini app\'i açın.';
+  const text = 'Botu aktif etmek için gruba katılın.';
   return bot.sendMessage(chatId, text, {
-    reply_markup: activationKeyboardFull(u.activation_token),
+    reply_markup: activationJoinKeyboard(),
   });
 }
 
-async function sendActivationWaiting(chatId, u) {
+async function sendActivationWaiting(chatId) {
   const text = '⏳ Aktivasyon bekleniyor.';
   return bot.sendMessage(chatId, text, {
-    reply_markup: activationKeyboardCheckOnly(),
+    reply_markup: activationCheckKeyboard(),
   });
+}
+
+async function isUserInActivationGroup(userId) {
+  try {
+    const member = await bot.getChatMember(ACTIVATION_GROUP_CHAT_ID, userId);
+    if (!member) return false;
+
+    const status = member.status || '';
+    if (status === 'creator' || status === 'administrator' || status === 'member') {
+      return true;
+    }
+
+    if (status === 'restricted' && member.is_member) {
+      return true;
+    }
+
+    return false;
+  } catch (err) {
+    console.error('GROUP CHECK ERROR:', err?.message || err);
+    return false;
+  }
 }
 
 /* =========================
@@ -314,7 +323,6 @@ async function getUser(id) {
 async function saveUser(id, data) {
   await redis.set(`user:${id}`, data);
 
-  // leaderboard
   await redis.zadd('leaderboard', {
     score: data.stars,
     member: id.toString(),
@@ -449,7 +457,6 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
       await saveUser(id, u);
     }
 
-    // İlk girişte yalnızca bir kez aktivasyon sor
     if (!u.activated) {
       if (!u.activation_prompted) {
         u.activation_prompted = true;
@@ -457,8 +464,7 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
         return sendActivationPrompt(id, u);
       }
 
-      // Sonraki /start’larda tekrar isteme; kontrol butonu kalsın
-      return sendActivationWaiting(id, u);
+      return sendActivationWaiting(id);
     }
 
     return sendMenuCard(id, u);
@@ -476,7 +482,6 @@ bot.on('message', async (msg) => {
     let u = await getUser(id);
     if (!u) return;
 
-    // Mini App veri akışı
     if (msg.web_app_data?.data) {
       let payload = null;
 
@@ -540,14 +545,20 @@ bot.on('callback_query', async (q) => {
 
     // Activation check
     if (data === 'check_activation') {
-      if (u.activated) {
+      const inGroup = await isUserInActivationGroup(id);
+
+      if (inGroup) {
+        u.activated = true;
+        u.activation_prompted = true;
+        await saveUser(id, u);
+
         await safeDelete(id, mid);
         return sendMenuCard(id, u);
       }
 
       return bot.answerCallbackQuery(q.id, {
-        text: 'Mini App henüz açılmadı.',
-        show_alert: false,
+        text: 'Önce gruba katılın.',
+        show_alert: true,
       });
     }
 
