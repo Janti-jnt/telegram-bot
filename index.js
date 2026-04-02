@@ -146,24 +146,23 @@ function getTaskIndex(u) {
 }
 
 function currentTask(u) {
-  const states = u.task_states || {};
   const idx = getTaskIndex(u);
 
-  // 1) First pass: unfinished tasks that are not skipped yet.
-  for (let i = 0; i < TASKS.length; i++) {
+  for (let i = idx; i < TASKS.length; i++) {
     const task = TASKS[i];
-    const st = states[String(task.id)] || 'pending';
-    if (st !== 'done' && st !== 'skipped') {
-      return task;
-    }
+    const st = taskState(u, task.id);
+    if (st !== 'done') return task;
   }
 
-  // 2) Revisit skipped tasks, starting from revisit cursor.
-  const start = Number.isInteger(u.task_revisit_cursor) ? u.task_revisit_cursor : idx;
-  for (let i = 0; i < TASKS.length; i++) {
-    const j = (start + i) % TASKS.length;
-    const task = TASKS[j];
-    const st = states[String(task.id)] || 'pending';
+  for (let i = 0; i < idx; i++) {
+    const task = TASKS[i];
+    const st = taskState(u, task.id);
+    if (st === 'skipped') return task;
+  }
+
+  for (let i = idx; i < TASKS.length; i++) {
+    const task = TASKS[i];
+    const st = taskState(u, task.id);
     if (st === 'skipped') return task;
   }
 
@@ -177,9 +176,8 @@ function isTasksFinished(u) {
 function markTaskSkipped(u, task) {
   if (!u.task_states) u.task_states = {};
   const key = String(task.id);
-  const st = taskState(u, task.id);
 
-  if (st !== 'done') {
+  if (taskState(u, task.id) !== 'done') {
     u.task_states[key] = 'skipped';
   }
 
@@ -196,13 +194,6 @@ function markTaskDone(u, task) {
   const idx = taskIndexById(task.id);
   u.task_revisit_cursor = idx >= 0 ? ((idx + 1) % TASKS.length) : 0;
   return u;
-}
-
-function taskTimerRemaining(u) {
-  const started = Number.isFinite(u.task_started_at) ? u.task_started_at : 0;
-  const elapsed = Date.now() - started;
-  const remaining = Math.ceil((TASK_WAIT_MS - elapsed) / 1000);
-  return Math.max(0, remaining);
 }
 
 // ======================================================
@@ -477,7 +468,6 @@ const texts = {
     taskSkip: '⏭ Görevi Geç',
     taskBack: '🔙 Geri',
     taskReward: 'Ödül',
-    taskTimer: 'Sayaç',
     taskInstruction1: 'Bota gir /start yap',
     taskInstruction2: '3 saniye bekle',
     taskInstruction3: 'Kontrol Et tuşuna bas',
@@ -487,7 +477,6 @@ const texts = {
     taskSkipped: '⏭ Görev geçildi',
     taskCount: (i, total) => `Görev ${i}/${total}`,
     taskIntro: 'Aşağıdaki botlardan birini aç, /start yap, 3 saniye bekle ve sonra kontrol et.',
-    taskNote: 'Not: Bu sistem timer bazlıdır.',
     taskNoMore: 'Görev listesi sona erdi',
     taskFinished: '✅ Tüm görevler tamamlandı',
     taskNoTask: '❌ Görev kalmadı',
@@ -519,7 +508,6 @@ const texts = {
     taskSkip: '⏭ Skip',
     taskBack: '🔙 Back',
     taskReward: 'Reward',
-    taskTimer: 'Timer',
     taskInstruction1: 'Enter the bot and /start',
     taskInstruction2: 'Wait 3 seconds',
     taskInstruction3: 'Press Check',
@@ -529,7 +517,6 @@ const texts = {
     taskSkipped: '⏭ Task skipped',
     taskCount: (i, total) => `Task ${i}/${total}`,
     taskIntro: 'Open one of the bots below, send /start, wait 3 seconds, then check.',
-    taskNote: 'Note: This system is timer-based.',
     taskNoMore: 'No more tasks left',
     taskFinished: '✅ All tasks completed',
     taskNoTask: '❌ No task left',
@@ -561,7 +548,6 @@ const texts = {
     taskSkip: '⏭ Пропустить',
     taskBack: '🔙 Назад',
     taskReward: 'Награда',
-    taskTimer: 'Таймер',
     taskInstruction1: 'Зайди в бота и /start',
     taskInstruction2: 'Подожди 3 секунды',
     taskInstruction3: 'Нажми Check',
@@ -571,7 +557,6 @@ const texts = {
     taskSkipped: '⏭ Задание пропущено',
     taskCount: (i, total) => `Задание ${i}/${total}`,
     taskIntro: 'Открой одного из ботов ниже, отправь /start, подожди 3 секунды, затем проверь.',
-    taskNote: 'Примечание: система работает по таймеру.',
     taskNoMore: 'Задания закончились',
     taskFinished: '✅ Все задания выполнены',
     taskNoTask: '❌ Заданий не осталось',
@@ -609,9 +594,6 @@ function taskScreenText(u) {
     `1) ${t.taskInstruction1}`,
     `2) ${t.taskInstruction2}`,
     `3) ${t.taskInstruction3}`,
-    '',
-    `${t.taskTimer}: 3 sec`,
-    t.taskNote,
   ];
 
   return lines.join('\n');
@@ -680,6 +662,7 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
         task_started_at: 0,
         task_revisit_cursor: 0,
         task_states: {},
+        task_active_task_id: 0,
       };
 
       await saveUser(id, u);
@@ -704,10 +687,10 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
       if (!Number.isFinite(u.task_started_at)) u.task_started_at = 0;
       if (!Number.isInteger(u.task_revisit_cursor)) u.task_revisit_cursor = 0;
       if (typeof u.task_states !== 'object' || u.task_states === null) u.task_states = {};
+      if (!Number.isInteger(u.task_active_task_id)) u.task_active_task_id = 0;
       await saveUser(id, u);
     }
 
-    // Ask only once. After that, never ask again.
     if (!u.activated) {
       if (!u.activation_prompted) {
         u.activation_prompted = true;
@@ -838,7 +821,6 @@ bot.on('callback_query', async (q) => {
         return replaceWithText(id, mid, taskScreenText(u), backKeyboard());
       }
 
-      const currentState = taskState(u, task.id);
       const activeId = Number.isInteger(u.task_active_task_id) ? u.task_active_task_id : 0;
 
       if (!u.task_started_at || activeId !== task.id) {
@@ -879,7 +861,7 @@ bot.on('callback_query', async (q) => {
       }
 
       const nextText = `${t.taskComplete}\n+${TASK_REWARD}⭐\n\n${taskScreenText(u)}`;
-      return sendTaskScreen(id, u, `${nextText}\n\n`);
+      return sendTextCard(id, nextText, taskKeyboardForUser(u));
     }
 
     // Task skip
@@ -896,17 +878,7 @@ bot.on('callback_query', async (q) => {
         return replaceWithText(id, mid, taskScreenText(u), backKeyboard());
       }
 
-      const idx = taskIndexById(task.id);
-      const currentState = taskState(u, task.id);
-
-      // Keep skipped tasks in the pool until they are completed.
       markTaskSkipped(u, task);
-      if (currentState === 'skipped') {
-        u.task_revisit_cursor = idx >= 0 ? ((idx + 1) % TASKS.length) : 0;
-      } else {
-        u.task_revisit_cursor = idx >= 0 ? idx : 0;
-      }
-
       u.task_started_at = 0;
       u.task_active_task_id = 0;
       await saveUser(id, u);
@@ -918,7 +890,7 @@ bot.on('callback_query', async (q) => {
       }
 
       const nextText = `${t.taskSkipped}\n\n${taskScreenText(u)}`;
-      return sendTaskScreen(id, u, `${nextText}\n\n`);
+      return sendTextCard(id, nextText, taskKeyboardForUser(u));
     }
 
     // PLAY
@@ -968,6 +940,50 @@ bot.on('callback_query', async (q) => {
     // WITHDRAW MENU
     if (data === 'withdraw') {
       return replaceWithText(id, mid, t.withdrawMenu, withdrawKeyboard());
+    }
+
+    // CREATE REQUEST
+    if (data.startsWith('w_')) {
+      const amount = parseInt(data.split('_')[1], 10);
+
+      if (!amount || u.stars < amount) {
+        return replaceWithText(id, mid, t.noMoney, backKeyboard());
+      }
+
+      u.stars -= amount;
+      await saveUser(id, u);
+
+      const reqId = await redis.incr('req_id');
+      const { date, time } = nowDateTime();
+
+      const req = {
+        id: reqId,
+        amount,
+        date,
+        time,
+        status: 'pending',
+      };
+
+      await saveRequest(id, req);
+
+      if (ADMIN_ID) {
+        try {
+          const name = displayName(u, id);
+          await bot.sendMessage(
+            ADMIN_ID,
+            `💸 NEW REQUEST\n\n#${reqId}\n👤 ${name}\n🆔 ${id}\n⭐ ${amount}\n📅 ${date} ${time}`
+          );
+        } catch (err) {
+          console.error('ADMIN NOTIFY ERROR:', err);
+        }
+      }
+
+      return replaceWithText(
+        id,
+        mid,
+        `#${reqId}\n${amount}⭐\n${date} ${time}\n⏳ ${t.requestPending}`,
+        backKeyboard()
+      );
     }
 
     // MY REQUESTS
@@ -1032,14 +1048,6 @@ bot.on('callback_query', async (q) => {
     // MENU
     if (data === 'menu') {
       return replaceWithMenu(id, mid, u);
-    }
-
-    // Legacy removed buy button from old messages
-    if (data === 'buy') {
-      return bot.answerCallbackQuery(q.id, {
-        text: 'Removed',
-        show_alert: false,
-      });
     }
   } catch (err) {
     console.error('CALLBACK ERROR:', err);
