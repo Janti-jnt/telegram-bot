@@ -148,19 +148,15 @@ function getTaskIndex(u) {
 function currentTask(u) {
   const idx = getTaskIndex(u);
 
+  // First: return the next pending task from the current cursor
   for (let i = idx; i < TASKS.length; i++) {
     const task = TASKS[i];
     const st = taskState(u, task.id);
-    if (st !== 'done') return task;
+    if (st === 'pending') return task;
   }
 
-  for (let i = 0; i < idx; i++) {
-    const task = TASKS[i];
-    const st = taskState(u, task.id);
-    if (st === 'skipped') return task;
-  }
-
-  for (let i = idx; i < TASKS.length; i++) {
+  // Then: if pending tasks are finished, revisit skipped ones
+  for (let i = 0; i < TASKS.length; i++) {
     const task = TASKS[i];
     const st = taskState(u, task.id);
     if (st === 'skipped') return task;
@@ -193,6 +189,16 @@ function markTaskDone(u, task) {
 
   const idx = taskIndexById(task.id);
   u.task_revisit_cursor = idx >= 0 ? ((idx + 1) % TASKS.length) : 0;
+  return u;
+}
+
+function advanceTaskCursor(u, task) {
+  const idx = taskIndexById(task.id);
+  if (idx >= 0) {
+    u.task_index = Math.min(idx + 1, TASKS.length);
+  }
+  u.task_started_at = 0;
+  u.task_active_task_id = 0;
   return u;
 }
 
@@ -322,7 +328,7 @@ function displayName(user, id) {
 const TMP_DIR = '/tmp';
 const HIDDEN_PNG_PATH = path.join(TMP_DIR, 'hidden-1x1.png');
 const HIDDEN_PNG_BASE64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAC1HAwCAAC1HAwCAAC0lEQVR42mP8/w8AAgMBApQn6XcAAAAASUVORK5CYII=';
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/w8AAgMBApQn6XcAAAAASUVORK5CYII=';
 
 try {
   if (!fs.existsSync(TMP_DIR)) {
@@ -411,6 +417,7 @@ async function getUser(id) {
   if (!Number.isFinite(u.task_started_at)) u.task_started_at = 0;
   if (!Number.isInteger(u.task_revisit_cursor)) u.task_revisit_cursor = 0;
   if (typeof u.task_states !== 'object' || u.task_states === null) u.task_states = {};
+  if (!Number.isInteger(u.task_active_task_id)) u.task_active_task_id = 0;
 
   return u;
 }
@@ -846,8 +853,7 @@ bot.on('callback_query', async (q) => {
 
       u.stars += TASK_REWARD;
       markTaskDone(u, task);
-      u.task_started_at = 0;
-      u.task_active_task_id = 0;
+      advanceTaskCursor(u, task);
       await saveUser(id, u);
 
       await safeDelete(id, mid);
@@ -861,7 +867,7 @@ bot.on('callback_query', async (q) => {
       }
 
       const nextText = `${t.taskComplete}\n+${TASK_REWARD}⭐\n\n${taskScreenText(u)}`;
-      return sendTextCard(id, nextText, taskKeyboardForUser(u));
+      return sendTaskScreen(id, u, `${nextText}\n\n`);
     }
 
     // Task skip
@@ -879,8 +885,7 @@ bot.on('callback_query', async (q) => {
       }
 
       markTaskSkipped(u, task);
-      u.task_started_at = 0;
-      u.task_active_task_id = 0;
+      advanceTaskCursor(u, task);
       await saveUser(id, u);
 
       await safeDelete(id, mid);
@@ -890,7 +895,7 @@ bot.on('callback_query', async (q) => {
       }
 
       const nextText = `${t.taskSkipped}\n\n${taskScreenText(u)}`;
-      return sendTextCard(id, nextText, taskKeyboardForUser(u));
+      return sendTaskScreen(id, u, `${nextText}\n\n`);
     }
 
     // PLAY
