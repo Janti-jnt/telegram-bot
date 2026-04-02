@@ -44,7 +44,7 @@ const redis = new Redis({
 
 const SPIN_COST = 50;
 const TASK_REWARD = 0.45;
-const TASK_WAIT_MS = 4000;
+const TASK_WAIT_MS = 3000;
 
 // ======================================================
 // Rewards
@@ -130,6 +130,15 @@ const TASKS = [
   },
 ];
 
+function taskState(u, taskId) {
+  if (!u.task_states) return 'pending';
+  return u.task_states[String(taskId)] || 'pending';
+}
+
+function taskIndexById(taskId) {
+  return TASKS.findIndex((t) => t.id === taskId);
+}
+
 function getTaskIndex(u) {
   const idx = Number.isInteger(u.task_index) ? u.task_index : 0;
   if (idx < 0) return 0;
@@ -137,21 +146,55 @@ function getTaskIndex(u) {
 }
 
 function currentTask(u) {
+  const states = u.task_states || {};
   const idx = getTaskIndex(u);
-  if (idx >= TASKS.length) return null;
-  return TASKS[idx];
+
+  // 1) First pass: unfinished tasks that are not skipped yet.
+  for (let i = 0; i < TASKS.length; i++) {
+    const task = TASKS[i];
+    const st = states[String(task.id)] || 'pending';
+    if (st !== 'done' && st !== 'skipped') {
+      return task;
+    }
+  }
+
+  // 2) Revisit skipped tasks, starting from revisit cursor.
+  const start = Number.isInteger(u.task_revisit_cursor) ? u.task_revisit_cursor : idx;
+  for (let i = 0; i < TASKS.length; i++) {
+    const j = (start + i) % TASKS.length;
+    const task = TASKS[j];
+    const st = states[String(task.id)] || 'pending';
+    if (st === 'skipped') return task;
+  }
+
+  return null;
 }
 
 function isTasksFinished(u) {
-  return getTaskIndex(u) >= TASKS.length;
+  return TASKS.every((task) => taskState(u, task.id) === 'done');
 }
 
-function advanceTask(u) {
-  u.task_index = getTaskIndex(u) + 1;
-  u.task_started_at = 0;
-  if (u.task_index >= TASKS.length) {
-    u.task_completed = true;
+function markTaskSkipped(u, task) {
+  if (!u.task_states) u.task_states = {};
+  const key = String(task.id);
+  const st = taskState(u, task.id);
+
+  if (st !== 'done') {
+    u.task_states[key] = 'skipped';
   }
+
+  const idx = taskIndexById(task.id);
+  u.task_revisit_cursor = idx >= 0 ? idx : 0;
+  return u;
+}
+
+function markTaskDone(u, task) {
+  if (!u.task_states) u.task_states = {};
+  const key = String(task.id);
+  u.task_states[key] = 'done';
+
+  const idx = taskIndexById(task.id);
+  u.task_revisit_cursor = idx >= 0 ? ((idx + 1) % TASKS.length) : 0;
   return u;
 }
 
@@ -178,7 +221,6 @@ function menuKeyboard(u) {
       [
         { text: t.play, callback_data: 'play' },
         { text: t.balance, callback_data: 'balance' },
-        { text: t.buy, callback_data: 'buy' },
       ],
       [
         { text: t.ref, callback_data: 'ref' },
@@ -200,7 +242,6 @@ function langKeyboard() {
       [{ text: '🇹🇷 TR', callback_data: 'lang_tr' }],
       [{ text: '🇬🇧 EN', callback_data: 'lang_en' }],
       [{ text: '🇷🇺 RU', callback_data: 'lang_ru' }],
-      [{ text: '🔙', callback_data: 'menu' }],
     ],
   };
 }
@@ -216,29 +257,6 @@ function withdrawKeyboard() {
   };
 }
 
-function taskKeyboardForUser(u) {
-  const t = texts[u.lang] || texts.tr;
-  const task = currentTask(u);
-
-  if (!task) {
-    return {
-      inline_keyboard: [[{ text: t.taskBack, callback_data: 'menu' }]],
-    };
-  }
-
-  return {
-    inline_keyboard: [
-      [{ text: t.taskOpen, url: task.url }],
-      [{ text: t.taskCheck, callback_data: 'task_check' }],
-      [{ text: t.taskSkip, callback_data: 'task_skip' }],
-      [{ text: t.taskBack, callback_data: 'menu' }],
-    ],
-  };
-}
-
-// ======================================================
-// Activation helpers
-// ======================================================
 function activationJoinKeyboard() {
   return {
     inline_keyboard: [
@@ -256,6 +274,9 @@ function activationCheckKeyboard() {
   };
 }
 
+// ======================================================
+// Activation helpers
+// ======================================================
 async function isUserInActivationGroup(userId) {
   try {
     const member = await bot.getChatMember(ACTIVATION_GROUP_CHAT_ID, userId);
@@ -310,7 +331,7 @@ function displayName(user, id) {
 const TMP_DIR = '/tmp';
 const HIDDEN_PNG_PATH = path.join(TMP_DIR, 'hidden-1x1.png');
 const HIDDEN_PNG_BASE64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/w8AAgMBApQn6XcAAAAASUVORK5CYII=';
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAC1HAwCAAC1HAwCAAC0lEQVR42mP8/w8AAgMBApQn6XcAAAAASUVORK5CYII=';
 
 try {
   if (!fs.existsSync(TMP_DIR)) {
@@ -351,9 +372,9 @@ async function sendMenuCard(chatId, u, prefix = '') {
 }
 
 async function sendTextCard(chatId, text, keyboard) {
-  const options = {};
-  if (keyboard) options.reply_markup = keyboard;
-  return bot.sendMessage(chatId, text, options);
+  return bot.sendMessage(chatId, text, {
+    reply_markup: keyboard,
+  });
 }
 
 async function replaceWithMenu(chatId, messageId, u, prefix = '') {
@@ -397,7 +418,8 @@ async function getUser(id) {
   if (!u.activation_token) u.activation_token = null;
   if (!Number.isInteger(u.task_index)) u.task_index = 0;
   if (!Number.isFinite(u.task_started_at)) u.task_started_at = 0;
-  if (typeof u.task_completed !== 'boolean') u.task_completed = false;
+  if (!Number.isInteger(u.task_revisit_cursor)) u.task_revisit_cursor = 0;
+  if (typeof u.task_states !== 'object' || u.task_states === null) u.task_states = {};
 
   return u;
 }
@@ -433,7 +455,6 @@ const texts = {
     menu: '🎰 Menü',
     play: '🎮 Oyna (50⭐)',
     balance: '⭐ Bakiye',
-    buy: '💰 Yükle',
     ref: '👥 Davet',
     withdraw: '💸 Çek',
     my: '📄 Taleplerim',
@@ -457,27 +478,25 @@ const texts = {
     taskBack: '🔙 Geri',
     taskReward: 'Ödül',
     taskTimer: 'Sayaç',
-    taskInstruction1: 'Görev botunu aç',
-    taskInstruction2: '4 saniye bekle',
-    taskInstruction3: 'Sonra kontrol et',
-    taskWait4: '⏳ 4 saniye bekle',
+    taskInstruction1: 'Bota gir /start yap',
+    taskInstruction2: '3 saniye bekle',
+    taskInstruction3: 'Kontrol Et tuşuna bas',
+    taskWait4: '⏳ 3 saniye bekle',
     taskReady: '✅ Artık kontrol edebilirsin',
     taskComplete: '🎉 Görev tamamlandı',
     taskSkipped: '⏭ Görev geçildi',
     taskCount: (i, total) => `Görev ${i}/${total}`,
-    taskIntro: 'Aşağıdaki botlardan birini aç, 4 saniye bekle ve sonra kontrol et.',
+    taskIntro: 'Aşağıdaki botlardan birini aç, /start yap, 3 saniye bekle ve sonra kontrol et.',
     taskNote: 'Not: Bu sistem timer bazlıdır.',
     taskNoMore: 'Görev listesi sona erdi',
     taskFinished: '✅ Tüm görevler tamamlandı',
     taskNoTask: '❌ Görev kalmadı',
-    taskCurrent: 'Şu anki görev',
   },
 
   en: {
     menu: '🎰 Menu',
     play: '🎮 Play (50⭐)',
     balance: '⭐ Balance',
-    buy: '💰 Deposit',
     ref: '👥 Invite',
     withdraw: '💸 Withdraw',
     my: '📄 My requests',
@@ -501,27 +520,25 @@ const texts = {
     taskBack: '🔙 Back',
     taskReward: 'Reward',
     taskTimer: 'Timer',
-    taskInstruction1: 'Open the task bot',
-    taskInstruction2: 'Wait 4 seconds',
-    taskInstruction3: 'Then press check',
-    taskWait4: '⏳ Wait 4 seconds',
+    taskInstruction1: 'Enter the bot and /start',
+    taskInstruction2: 'Wait 3 seconds',
+    taskInstruction3: 'Press Check',
+    taskWait4: '⏳ Wait 3 seconds',
     taskReady: '✅ You can check now',
     taskComplete: '🎉 Task completed',
     taskSkipped: '⏭ Task skipped',
     taskCount: (i, total) => `Task ${i}/${total}`,
-    taskIntro: 'Open one of the bots below, wait 4 seconds, then check.',
+    taskIntro: 'Open one of the bots below, send /start, wait 3 seconds, then check.',
     taskNote: 'Note: This system is timer-based.',
     taskNoMore: 'No more tasks left',
     taskFinished: '✅ All tasks completed',
     taskNoTask: '❌ No task left',
-    taskCurrent: 'Current task',
   },
 
   ru: {
     menu: '🎰 Меню',
     play: '🎮 Играть (50⭐)',
     balance: '⭐ Баланс',
-    buy: '💰 Пополнить',
     ref: '👥 Пригласить',
     withdraw: '💸 Вывод',
     my: '📄 Мои заявки',
@@ -545,31 +562,25 @@ const texts = {
     taskBack: '🔙 Назад',
     taskReward: 'Награда',
     taskTimer: 'Таймер',
-    taskInstruction1: 'Открой бота задания',
-    taskInstruction2: 'Подожди 4 секунды',
-    taskInstruction3: 'Потом нажми проверку',
-    taskWait4: '⏳ Подожди 4 секунды',
+    taskInstruction1: 'Зайди в бота и /start',
+    taskInstruction2: 'Подожди 3 секунды',
+    taskInstruction3: 'Нажми Check',
+    taskWait4: '⏳ Подожди 3 секунды',
     taskReady: '✅ Теперь можно проверять',
     taskComplete: '🎉 Задание выполнено',
     taskSkipped: '⏭ Задание пропущено',
     taskCount: (i, total) => `Задание ${i}/${total}`,
-    taskIntro: 'Открой одного из ботов ниже, подожди 4 секунды, затем проверь.',
+    taskIntro: 'Открой одного из ботов ниже, отправь /start, подожди 3 секунды, затем проверь.',
     taskNote: 'Примечание: система работает по таймеру.',
     taskNoMore: 'Задания закончились',
     taskFinished: '✅ Все задания выполнены',
     taskNoTask: '❌ Заданий не осталось',
-    taskCurrent: 'Текущее задание',
   },
 };
 
-// ======================================================
-// Task screen text / keyboard
-// ======================================================
 function taskScreenText(u) {
   const t = texts[u.lang] || texts.tr;
   const task = currentTask(u);
-  const idx = getTaskIndex(u) + 1;
-  const total = TASKS.length;
 
   if (!task) {
     const lines = [
@@ -584,6 +595,9 @@ function taskScreenText(u) {
     return lines.join('\n');
   }
 
+  const idx = TASKS.findIndex((x) => x.id === task.id) + 1;
+  const total = TASKS.length;
+
   const lines = [
     `🧩 ${t.taskTitle}`,
     '',
@@ -596,7 +610,7 @@ function taskScreenText(u) {
     `2) ${t.taskInstruction2}`,
     `3) ${t.taskInstruction3}`,
     '',
-    `${t.taskTimer}: 4 sec`,
+    `${t.taskTimer}: 3 sec`,
     t.taskNote,
   ];
 
@@ -624,10 +638,15 @@ function taskKeyboardForUser(u) {
 }
 
 async function sendTaskScreen(chatId, u, prefix = '') {
-  if (!u.task_started_at) {
-    u.task_started_at = Date.now();
-    await saveUser(chatId, u);
+  const task = currentTask(u);
+
+  if (!task) {
+    return sendTextCard(chatId, `${prefix}${taskScreenText(u)}`, backKeyboard());
   }
+
+  u.task_started_at = Date.now();
+  u.task_active_task_id = task.id;
+  await saveUser(chatId, u);
 
   return sendTextCard(chatId, `${prefix}${taskScreenText(u)}`, taskKeyboardForUser(u));
 }
@@ -659,7 +678,8 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
         activation_token: `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
         task_index: 0,
         task_started_at: 0,
-        task_completed: false,
+        task_revisit_cursor: 0,
+        task_states: {},
       };
 
       await saveUser(id, u);
@@ -682,10 +702,12 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
       }
       if (!Number.isInteger(u.task_index)) u.task_index = 0;
       if (!Number.isFinite(u.task_started_at)) u.task_started_at = 0;
-      if (typeof u.task_completed !== 'boolean') u.task_completed = false;
+      if (!Number.isInteger(u.task_revisit_cursor)) u.task_revisit_cursor = 0;
+      if (typeof u.task_states !== 'object' || u.task_states === null) u.task_states = {};
       await saveUser(id, u);
     }
 
+    // Ask only once. After that, never ask again.
     if (!u.activated) {
       if (!u.activation_prompted) {
         u.activation_prompted = true;
@@ -813,11 +835,15 @@ bot.on('callback_query', async (q) => {
 
       const task = currentTask(u);
       if (!task) {
-        return replaceWithText(id, mid, taskScreenText(u), taskKeyboardForUser(u));
+        return replaceWithText(id, mid, taskScreenText(u), backKeyboard());
       }
 
-      if (!u.task_started_at) {
+      const currentState = taskState(u, task.id);
+      const activeId = Number.isInteger(u.task_active_task_id) ? u.task_active_task_id : 0;
+
+      if (!u.task_started_at || activeId !== task.id) {
         u.task_started_at = Date.now();
+        u.task_active_task_id = task.id;
         await saveUser(id, u);
 
         return bot.answerCallbackQuery(q.id, {
@@ -837,7 +863,9 @@ bot.on('callback_query', async (q) => {
       }
 
       u.stars += TASK_REWARD;
-      advanceTask(u);
+      markTaskDone(u, task);
+      u.task_started_at = 0;
+      u.task_active_task_id = 0;
       await saveUser(id, u);
 
       await safeDelete(id, mid);
@@ -846,12 +874,12 @@ bot.on('callback_query', async (q) => {
         return sendTextCard(
           id,
           `${t.taskComplete}\n+${TASK_REWARD}⭐\n\n${taskScreenText(u)}`,
-          taskKeyboardForUser(u)
+          backKeyboard()
         );
       }
 
       const nextText = `${t.taskComplete}\n+${TASK_REWARD}⭐\n\n${taskScreenText(u)}`;
-      return sendTextCard(id, nextText, taskKeyboardForUser(u));
+      return sendTaskScreen(id, u, `${nextText}\n\n`);
     }
 
     // Task skip
@@ -865,19 +893,32 @@ bot.on('callback_query', async (q) => {
 
       const task = currentTask(u);
       if (!task) {
-        return replaceWithText(id, mid, taskScreenText(u), taskKeyboardForUser(u));
+        return replaceWithText(id, mid, taskScreenText(u), backKeyboard());
       }
 
-      advanceTask(u);
+      const idx = taskIndexById(task.id);
+      const currentState = taskState(u, task.id);
+
+      // Keep skipped tasks in the pool until they are completed.
+      markTaskSkipped(u, task);
+      if (currentState === 'skipped') {
+        u.task_revisit_cursor = idx >= 0 ? ((idx + 1) % TASKS.length) : 0;
+      } else {
+        u.task_revisit_cursor = idx >= 0 ? idx : 0;
+      }
+
+      u.task_started_at = 0;
+      u.task_active_task_id = 0;
       await saveUser(id, u);
 
       await safeDelete(id, mid);
 
       if (isTasksFinished(u)) {
-        return sendTextCard(id, `${t.taskSkipped}\n\n${taskScreenText(u)}`, taskKeyboardForUser(u));
+        return sendTextCard(id, `${t.taskSkipped}\n\n${taskScreenText(u)}`, backKeyboard());
       }
 
-      return sendTextCard(id, `${t.taskSkipped}\n\n${taskScreenText(u)}`, taskKeyboardForUser(u));
+      const nextText = `${t.taskSkipped}\n\n${taskScreenText(u)}`;
+      return sendTaskScreen(id, u, `${nextText}\n\n`);
     }
 
     // PLAY
@@ -915,14 +956,6 @@ bot.on('callback_query', async (q) => {
       return replaceWithText(id, mid, `⭐ ${u.stars}\n👥 ${u.refs}`, backKeyboard());
     }
 
-    // BUY
-    if (data === 'buy') {
-      u.waiting = true;
-      await saveUser(id, u);
-
-      return replaceWithText(id, mid, t.ask, backKeyboard());
-    }
-
     // REF
     if (data === 'ref') {
       const link = BOT_USERNAME
@@ -935,50 +968,6 @@ bot.on('callback_query', async (q) => {
     // WITHDRAW MENU
     if (data === 'withdraw') {
       return replaceWithText(id, mid, t.withdrawMenu, withdrawKeyboard());
-    }
-
-    // CREATE REQUEST
-    if (data.startsWith('w_')) {
-      const amount = parseInt(data.split('_')[1], 10);
-
-      if (!amount || u.stars < amount) {
-        return replaceWithText(id, mid, t.noMoney, backKeyboard());
-      }
-
-      u.stars -= amount;
-      await saveUser(id, u);
-
-      const reqId = await redis.incr('req_id');
-      const { date, time } = nowDateTime();
-
-      const req = {
-        id: reqId,
-        amount,
-        date,
-        time,
-        status: 'pending',
-      };
-
-      await saveRequest(id, req);
-
-      if (ADMIN_ID) {
-        try {
-          const name = displayName(u, id);
-          await bot.sendMessage(
-            ADMIN_ID,
-            `💸 NEW REQUEST\n\n#${reqId}\n👤 ${name}\n🆔 ${id}\n⭐ ${amount}\n📅 ${date} ${time}`
-          );
-        } catch (err) {
-          console.error('ADMIN NOTIFY ERROR:', err);
-        }
-      }
-
-      return replaceWithText(
-        id,
-        mid,
-        `#${reqId}\n${amount}⭐\n${date} ${time}\n⏳ ${t.requestPending}`,
-        backKeyboard()
-      );
     }
 
     // MY REQUESTS
@@ -1043,6 +1032,14 @@ bot.on('callback_query', async (q) => {
     // MENU
     if (data === 'menu') {
       return replaceWithMenu(id, mid, u);
+    }
+
+    // Legacy removed buy button from old messages
+    if (data === 'buy') {
+      return bot.answerCallbackQuery(q.id, {
+        text: 'Removed',
+        show_alert: false,
+      });
     }
   } catch (err) {
     console.error('CALLBACK ERROR:', err);
