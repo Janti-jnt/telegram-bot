@@ -155,7 +155,7 @@ function currentTask(u) {
     if (st === 'pending') return task;
   }
 
-  // Then: if pending tasks are finished, revisit skipped ones
+  // Then: when pending tasks are done, revisit skipped ones
   for (let i = 0; i < TASKS.length; i++) {
     const task = TASKS[i];
     const st = taskState(u, task.id);
@@ -177,8 +177,6 @@ function markTaskSkipped(u, task) {
     u.task_states[key] = 'skipped';
   }
 
-  const idx = taskIndexById(task.id);
-  u.task_revisit_cursor = idx >= 0 ? idx : 0;
   return u;
 }
 
@@ -186,17 +184,18 @@ function markTaskDone(u, task) {
   if (!u.task_states) u.task_states = {};
   const key = String(task.id);
   u.task_states[key] = 'done';
-
-  const idx = taskIndexById(task.id);
-  u.task_revisit_cursor = idx >= 0 ? ((idx + 1) % TASKS.length) : 0;
   return u;
 }
 
 function advanceTaskCursor(u, task) {
   const idx = taskIndexById(task.id);
+
   if (idx >= 0) {
-    u.task_index = Math.min(idx + 1, TASKS.length);
+    u.task_index = idx + 1;
+  } else {
+    u.task_index = (Number.isInteger(u.task_index) ? u.task_index : 0) + 1;
   }
+
   u.task_started_at = 0;
   u.task_active_task_id = 0;
   return u;
@@ -328,7 +327,7 @@ function displayName(user, id) {
 const TMP_DIR = '/tmp';
 const HIDDEN_PNG_PATH = path.join(TMP_DIR, 'hidden-1x1.png');
 const HIDDEN_PNG_BASE64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/w8AAgMBApQn6XcAAAAASUVORK5CYII=';
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAC1HAwCAAC1HAwCAAC0lEQVR42mP8/w8AAgMBApQn6XcAAAAASUVORK5CYII=';
 
 try {
   if (!fs.existsSync(TMP_DIR)) {
@@ -415,7 +414,6 @@ async function getUser(id) {
   if (!u.activation_token) u.activation_token = null;
   if (!Number.isInteger(u.task_index)) u.task_index = 0;
   if (!Number.isFinite(u.task_started_at)) u.task_started_at = 0;
-  if (!Number.isInteger(u.task_revisit_cursor)) u.task_revisit_cursor = 0;
   if (typeof u.task_states !== 'object' || u.task_states === null) u.task_states = {};
   if (!Number.isInteger(u.task_active_task_id)) u.task_active_task_id = 0;
 
@@ -667,7 +665,6 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
         activation_token: `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
         task_index: 0,
         task_started_at: 0,
-        task_revisit_cursor: 0,
         task_states: {},
         task_active_task_id: 0,
       };
@@ -692,7 +689,6 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
       }
       if (!Number.isInteger(u.task_index)) u.task_index = 0;
       if (!Number.isFinite(u.task_started_at)) u.task_started_at = 0;
-      if (!Number.isInteger(u.task_revisit_cursor)) u.task_revisit_cursor = 0;
       if (typeof u.task_states !== 'object' || u.task_states === null) u.task_states = {};
       if (!Number.isInteger(u.task_active_task_id)) u.task_active_task_id = 0;
       await saveUser(id, u);
