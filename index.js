@@ -123,7 +123,6 @@ function buildActivationUrl(token) {
 
   if (!token) return base;
 
-  // URL'de startapp varsa değiştir, yoksa ekle
   if (base.includes('startapp=')) {
     return base.replace(/startapp=([^&]+)/, `startapp=${encodeURIComponent(token)}`);
   }
@@ -280,18 +279,14 @@ async function replaceWithText(chatId, messageId, text, replyMarkup) {
 async function sendActivationPrompt(chatId, u) {
   const text = 'Botu aktif etmek için mini app\'i açın.';
   return bot.sendMessage(chatId, text, {
-    reply_markup: {
-      inline_keyboard: activationKeyboardFull(u.activation_token).inline_keyboard,
-    },
+    reply_markup: activationKeyboardFull(u.activation_token),
   });
 }
 
 async function sendActivationWaiting(chatId, u) {
   const text = '⏳ Aktivasyon bekleniyor.';
   return bot.sendMessage(chatId, text, {
-    reply_markup: {
-      inline_keyboard: activationKeyboardCheckOnly().inline_keyboard,
-    },
+    reply_markup: activationKeyboardCheckOnly(),
   });
 }
 
@@ -462,7 +457,7 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
         return sendActivationPrompt(id, u);
       }
 
-      // Sonraki /start’larda tekrar “açın” diye sormasın
+      // Sonraki /start’larda tekrar isteme; kontrol butonu kalsın
       return sendActivationWaiting(id, u);
     }
 
@@ -481,7 +476,7 @@ bot.on('message', async (msg) => {
     let u = await getUser(id);
     if (!u) return;
 
-    // Mini App data geldiyse aktivasyon kontrolü
+    // Mini App veri akışı
     if (msg.web_app_data?.data) {
       let payload = null;
 
