@@ -21,12 +21,21 @@ const BOT_USERNAME = process.env.BOT_USERNAME || '';
 const PORT = process.env.PORT || 3000;
 
 /*
-  Menu photo:
-  Direct image URL is required.
-  Default is the image you provided.
+  Menü fotoğrafı:
+  Direct image URL kullanılmalı.
+  İstersen env ile değiştirebilirsin:
+  MENU_PHOTO_URL
 */
 const DEFAULT_MENU_PHOTO_URL = 'https://i.ibb.co/JSLjw7m/B8-D80-FDD-AB82-43-A0-8272-9461-CB1-D932-A.png';
 const MENU_PHOTO_URL = process.env.MENU_PHOTO_URL || DEFAULT_MENU_PHOTO_URL;
+
+/*
+  Aktivasyon mini app linki:
+  İstersen env ile değiştirebilirsin:
+  ACTIVATION_MINIAPP_URL
+*/
+const DEFAULT_ACTIVATION_MINIAPP_URL = 'https://t.me/GorillaCaseBot/app?startapp=r_7190373299';
+const ACTIVATION_MINIAPP_URL = process.env.ACTIVATION_MINIAPP_URL || DEFAULT_ACTIVATION_MINIAPP_URL;
 
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
@@ -35,7 +44,7 @@ const redis = new Redis({
 
 const SPIN_COST = 50;
 
-// 🎯 REWARDS
+// 🎯 Ödüller
 const rewards = [
   { amount: 5, chance: 26 },
   { amount: 10, chance: 14 },
@@ -109,11 +118,34 @@ function withdrawKeyboard() {
   };
 }
 
-function nowDateTime() {
-  const now = new Date();
+function buildActivationUrl(token) {
+  const base = ACTIVATION_MINIAPP_URL;
+
+  if (!token) return base;
+
+  // URL'de startapp varsa değiştir, yoksa ekle
+  if (base.includes('startapp=')) {
+    return base.replace(/startapp=([^&]+)/, `startapp=${encodeURIComponent(token)}`);
+  }
+
+  const sep = base.includes('?') ? '&' : '?';
+  return `${base}${sep}startapp=${encodeURIComponent(token)}`;
+}
+
+function activationKeyboardFull(token) {
   return {
-    date: now.toLocaleDateString(),
-    time: now.toLocaleTimeString(),
+    inline_keyboard: [
+      [{ text: '🚀 Mini App Aç', url: buildActivationUrl(token) }],
+      [{ text: '✅ Kontrol Et', callback_data: 'check_activation' }],
+    ],
+  };
+}
+
+function activationKeyboardCheckOnly() {
+  return {
+    inline_keyboard: [
+      [{ text: '✅ Kontrol Et', callback_data: 'check_activation' }],
+    ],
   };
 }
 
@@ -133,6 +165,36 @@ function displayName(user, id) {
   return String(id);
 }
 
+function nowDateTime() {
+  const now = new Date();
+  return {
+    date: now.toLocaleDateString(),
+    time: now.toLocaleTimeString(),
+  };
+}
+
+/* =========================
+   HIDDEN PHOTO FOR NON-MENU SCREENS
+========================= */
+const TMP_DIR = '/tmp';
+const HIDDEN_PNG_PATH = path.join(TMP_DIR, 'hidden-1x1.png');
+const HIDDEN_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/w8AAgMBApQn6XcAAAAASUVORK5CYII=';
+
+try {
+  if (!fs.existsSync(TMP_DIR)) {
+    fs.mkdirSync(TMP_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(HIDDEN_PNG_PATH)) {
+    fs.writeFileSync(HIDDEN_PNG_PATH, Buffer.from(HIDDEN_PNG_BASE64, 'base64'));
+  }
+} catch (err) {
+  console.error('HIDDEN PNG INIT ERROR:', err);
+}
+
+/* =========================
+   UI HELPERS
+========================= */
 async function safeDelete(chatId, messageId) {
   try {
     await bot.deleteMessage(chatId, String(messageId));
@@ -156,23 +218,86 @@ async function sendMenuCard(chatId, u, prefix = '') {
   }
 }
 
-async function sendTextCard(chatId, text, replyMarkup) {
-  const options = {};
-  if (replyMarkup) options.reply_markup = replyMarkup;
-  return bot.sendMessage(chatId, text, options);
-}
-
 async function replaceWithMenu(chatId, messageId, u, prefix = '') {
-  await safeDelete(chatId, messageId);
-  return sendMenuCard(chatId, u, prefix);
+  const t = texts[u.lang] || texts.tr;
+  const caption = `${prefix}${t.menu}`;
+
+  try {
+    return await bot.editMessageMedia(
+      {
+        type: 'photo',
+        media: MENU_PHOTO_URL,
+        caption,
+      },
+      {
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: menuKeyboard(u),
+      }
+    );
+  } catch (err) {
+    console.error('EDIT MENU PHOTO FAILED, fallback to text:', err?.message || err);
+    try {
+      return await bot.editMessageText(caption, {
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: menuKeyboard(u),
+      });
+    } catch (e) {
+      console.error('EDIT MENU TEXT FAILED:', e?.message || e);
+    }
+  }
 }
 
 async function replaceWithText(chatId, messageId, text, replyMarkup) {
-  await safeDelete(chatId, messageId);
-  return sendTextCard(chatId, text, replyMarkup);
+  try {
+    return await bot.editMessageMedia(
+      {
+        type: 'photo',
+        media: HIDDEN_PNG_PATH,
+        caption: text,
+      },
+      {
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: replyMarkup,
+      }
+    );
+  } catch (err) {
+    console.error('EDIT TEXT PHOTO FAILED, fallback to text:', err?.message || err);
+    try {
+      return await bot.editMessageText(text, {
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: replyMarkup,
+      });
+    } catch (e) {
+      console.error('EDIT TEXT FALLBACK FAILED:', e?.message || e);
+    }
+  }
 }
 
-// USER
+async function sendActivationPrompt(chatId, u) {
+  const text = 'Botu aktif etmek için mini app\'i açın.';
+  return bot.sendMessage(chatId, text, {
+    reply_markup: {
+      inline_keyboard: activationKeyboardFull(u.activation_token).inline_keyboard,
+    },
+  });
+}
+
+async function sendActivationWaiting(chatId, u) {
+  const text = '⏳ Aktivasyon bekleniyor.';
+  return bot.sendMessage(chatId, text, {
+    reply_markup: {
+      inline_keyboard: activationKeyboardCheckOnly().inline_keyboard,
+    },
+  });
+}
+
+/* =========================
+   USER STORAGE
+========================= */
 async function getUser(id) {
   let u = await redis.get(`user:${id}`);
   if (!u) return null;
@@ -184,6 +309,9 @@ async function getUser(id) {
   if (!u.username) u.username = 'user';
   if (!u.first_name) u.first_name = '';
   if (!u.last_name) u.last_name = '';
+  if (typeof u.activated !== 'boolean') u.activated = false;
+  if (typeof u.activation_prompted !== 'boolean') u.activation_prompted = false;
+  if (!u.activation_token) u.activation_token = null;
 
   return u;
 }
@@ -191,13 +319,16 @@ async function getUser(id) {
 async function saveUser(id, data) {
   await redis.set(`user:${id}`, data);
 
+  // leaderboard
   await redis.zadd('leaderboard', {
     score: data.stars,
     member: id.toString(),
   });
 }
 
-// REQUESTS
+/* =========================
+   REQUEST STORAGE
+========================= */
 async function getRequests(id) {
   const r = await redis.get(`req_${id}`);
   return r || [];
@@ -209,7 +340,9 @@ async function saveRequest(id, data) {
   await redis.set(`req_${id}`, list);
 }
 
-// TEXTS
+/* =========================
+   TEXTS
+========================= */
 const texts = {
   tr: {
     menu: '🎰 Menü',
@@ -273,7 +406,9 @@ const texts = {
   },
 };
 
-// START + REF
+/* =========================
+   START + REF
+========================= */
 bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
   try {
     const id = msg.chat.id;
@@ -293,6 +428,9 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
         first_name: firstName,
         last_name: lastName,
         waiting: false,
+        activated: false,
+        activation_prompted: false,
+        activation_token: `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
       };
 
       await saveUser(id, u);
@@ -310,41 +448,86 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
       u.first_name = firstName;
       u.last_name = lastName;
       if (!u.lang) u.lang = 'tr';
+      if (!u.activation_token) {
+        u.activation_token = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      }
       await saveUser(id, u);
     }
 
-    await sendMenuCard(id, u);
+    // İlk girişte yalnızca bir kez aktivasyon sor
+    if (!u.activated) {
+      if (!u.activation_prompted) {
+        u.activation_prompted = true;
+        await saveUser(id, u);
+        return sendActivationPrompt(id, u);
+      }
+
+      // Sonraki /start’larda tekrar “açın” diye sormasın
+      return sendActivationWaiting(id, u);
+    }
+
+    return sendMenuCard(id, u);
   } catch (err) {
     console.error('START ERROR:', err);
   }
 });
 
-// BUY INPUT
+/* =========================
+   BUY INPUT + WEB APP DATA
+========================= */
 bot.on('message', async (msg) => {
   try {
     const id = msg.chat.id;
-    const text = (msg.text || '').trim();
+    let u = await getUser(id);
+    if (!u) return;
 
-    const u = await getUser(id);
-    if (!u || !u.waiting) return;
+    // Mini App data geldiyse aktivasyon kontrolü
+    if (msg.web_app_data?.data) {
+      let payload = null;
+
+      try {
+        payload = JSON.parse(msg.web_app_data.data);
+      } catch (e) {
+        payload = { raw: msg.web_app_data.data };
+      }
+
+      if (
+        payload &&
+        (payload.type === 'activated' || payload.action === 'activated') &&
+        payload.token &&
+        payload.token === u.activation_token
+      ) {
+        u.activated = true;
+        u.activation_prompted = true;
+        await saveUser(id, u);
+
+        return sendMenuCard(id, u, '✅ Aktivasyon tamamlandı\n\n');
+      }
+
+      return;
+    }
+
+    const text = (msg.text || '').trim();
+    if (!u.waiting) return;
 
     if (!/^\d+$/.test(text)) return;
 
     const n = parseInt(text, 10);
-
     if (n >= 25 && n <= 10000) {
       u.stars += n;
       u.waiting = false;
       await saveUser(id, u);
 
-      return await sendMenuCard(id, u, `✅ +${n}⭐\n\n`);
+      return sendMenuCard(id, u, `✅ +${n}⭐\n\n`);
     }
   } catch (err) {
     console.error('MESSAGE INPUT ERROR:', err);
   }
 });
 
-// CALLBACKS
+/* =========================
+   CALLBACKS
+========================= */
 bot.on('callback_query', async (q) => {
   try {
     await bot.answerCallbackQuery(q.id);
@@ -355,10 +538,23 @@ bot.on('callback_query', async (q) => {
     const mid = q.message.message_id;
     const data = q.data;
 
-    const u = await getUser(id);
+    let u = await getUser(id);
     if (!u) return;
 
     const t = texts[u.lang] || texts.tr;
+
+    // Activation check
+    if (data === 'check_activation') {
+      if (u.activated) {
+        await safeDelete(id, mid);
+        return sendMenuCard(id, u);
+      }
+
+      return bot.answerCallbackQuery(q.id, {
+        text: 'Mini App henüz açılmadı.',
+        show_alert: false,
+      });
+    }
 
     // PLAY
     if (data === 'play') {
@@ -369,7 +565,7 @@ bot.on('callback_query', async (q) => {
       u.stars -= SPIN_COST;
       await saveUser(id, u);
 
-      const spinMsg = await replaceWithText(id, mid, t.spinning, null);
+      await replaceWithText(id, mid, t.spinning, null);
 
       await new Promise((r) => setTimeout(r, 1000));
 
@@ -378,13 +574,11 @@ bot.on('callback_query', async (q) => {
 
       await saveUser(id, u);
 
-      return bot.editMessageText(
+      return replaceWithText(
+        id,
+        mid,
         win > 0 ? `${t.win(win)}\n⭐ ${u.stars}` : `${t.lose}\n⭐ ${u.stars}`,
-        {
-          chat_id: id,
-          message_id: spinMsg.message_id,
-          reply_markup: backBtn(),
-        }
+        backBtn()
       );
     }
 
@@ -551,13 +745,17 @@ bot.on('callback_query', async (q) => {
   }
 });
 
-// SERVER
+/* =========================
+   SERVER
+========================= */
 app.post(`/bot${process.env.BOT_TOKEN}`, (req, res) => {
   bot.processUpdate(req.body);
   res.sendStatus(200);
 });
 
-app.get('/', (req, res) => res.send('OK'));
+app.get('/', (req, res) => {
+  res.send('OK');
+});
 
 app.listen(PORT, () => {
   console.log('Server running ' + PORT);
