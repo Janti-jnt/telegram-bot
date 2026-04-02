@@ -1,8 +1,6 @@
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 const { Redis } = require('@upstash/redis');
-const fs = require('fs');
-const path = require('path');
 
 process.on('unhandledRejection', (err) => {
   console.error('UNHANDLED_REJECTION:', err);
@@ -66,12 +64,10 @@ const rewards = [
 function spin() {
   let r = Math.random() * 100;
   let sum = 0;
-
   for (const item of rewards) {
     sum += item.chance;
     if (r <= sum) return item.amount;
   }
-
   return 0;
 }
 
@@ -83,51 +79,15 @@ function delay(ms) {
 // Tasks
 // ======================================================
 const TASKS = [
-  {
-    id: 1,
-    name: 'rahmetbrobot',
-    url: 'https://t.me/rahmetbrobot?start=_tgr_Qk_L4481NTMy',
-  },
-  {
-    id: 2,
-    name: 'onelinkgo_bot',
-    url: 'https://t.me/onelinkgo_bot?start=_tgr_tEBbQ1lmNWIy',
-  },
-  {
-    id: 3,
-    name: 'bababoba2bot',
-    url: 'https://t.me/bababoba2bot?start=_tgr_BIVFp9BjYzhi',
-  },
-  {
-    id: 4,
-    name: 'peretopzvbot',
-    url: 'https://t.me/peretopzvbot?start=_tgr_lo4LoWthZWIy',
-  },
-  {
-    id: 5,
-    name: 'lastdayzetbot',
-    url: 'https://t.me/lastdayzetbot?start=_tgr_2D2rGHZkYzBi',
-  },
-  {
-    id: 6,
-    name: 'StarsSwapAutoBot',
-    url: 'https://t.me/StarsSwapAutoBot?start=_tgr_Yfyia040MGVi',
-  },
-  {
-    id: 7,
-    name: 'SugarGenBox_bot',
-    url: 'https://t.me/SugarGenBox_bot?start=_tgr_aXqKf55kYzUy',
-  },
-  {
-    id: 8,
-    name: 'ImarketTostar_bot',
-    url: 'https://t.me/ImarketTostar_bot?start=_tgr_AjkkQzsxOWMy',
-  },
-  {
-    id: 9,
-    name: 'BuyVPN_Global_bot',
-    url: 'https://t.me/BuyVPN_Global_bot?start=_tgr_yCNoJnQzOTMy',
-  },
+  { id: 1, name: 'rahmetbrobot', url: 'https://t.me/rahmetbrobot?start=_tgr_Qk_L4481NTMy' },
+  { id: 2, name: 'onelinkgo_bot', url: 'https://t.me/onelinkgo_bot?start=_tgr_tEBbQ1lmNWIy' },
+  { id: 3, name: 'bababoba2bot', url: 'https://t.me/bababoba2bot?start=_tgr_BIVFp9BjYzhi' },
+  { id: 4, name: 'peretopzvbot', url: 'https://t.me/peretopzvbot?start=_tgr_lo4LoWthZWIy' },
+  { id: 5, name: 'lastdayzetbot', url: 'https://t.me/lastdayzetbot?start=_tgr_2D2rGHZkYzBi' },
+  { id: 6, name: 'StarsSwapAutoBot', url: 'https://t.me/StarsSwapAutoBot?start=_tgr_Yfyia040MGVi' },
+  { id: 7, name: 'SugarGenBox_bot', url: 'https://t.me/SugarGenBox_bot?start=_tgr_aXqKf55kYzUy' },
+  { id: 8, name: 'ImarketTostar_bot', url: 'https://t.me/ImarketTostar_bot?start=_tgr_AjkkQzsxOWMy' },
+  { id: 9, name: 'BuyVPN_Global_bot', url: 'https://t.me/BuyVPN_Global_bot?start=_tgr_yCNoJnQzOTMy' },
 ];
 
 function taskState(u, taskId) {
@@ -322,26 +282,6 @@ function displayName(user, id) {
 }
 
 // ======================================================
-// Hidden image for text screens
-// ======================================================
-const TMP_DIR = '/tmp';
-const HIDDEN_PNG_PATH = path.join(TMP_DIR, 'hidden-1x1.png');
-const HIDDEN_PNG_BASE64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAC1HAwCAAC1HAwCAAC0lEQVR42mP8/w8AAgMBApQn6XcAAAAASUVORK5CYII=';
-
-try {
-  if (!fs.existsSync(TMP_DIR)) {
-    fs.mkdirSync(TMP_DIR, { recursive: true });
-  }
-
-  if (!fs.existsSync(HIDDEN_PNG_PATH)) {
-    fs.writeFileSync(HIDDEN_PNG_PATH, Buffer.from(HIDDEN_PNG_BASE64, 'base64'));
-  }
-} catch (err) {
-  console.error('HIDDEN PNG INIT ERROR:', err);
-}
-
-// ======================================================
 // Safe message helpers
 // ======================================================
 async function safeDelete(chatId, messageId) {
@@ -476,8 +416,6 @@ const texts = {
     taskInstruction1: 'Bota gir /start yap',
     taskInstruction2: '3 saniye bekle',
     taskInstruction3: 'Kontrol Et tuşuna bas',
-    taskWait4: '⏳ 3 saniye bekle',
-    taskReady: '✅ Artık kontrol edebilirsin',
     taskComplete: '🎉 Görev tamamlandı',
     taskSkipped: '⏭ Görev geçildi',
     taskCount: (i, total) => `Görev ${i}/${total}`,
@@ -516,8 +454,6 @@ const texts = {
     taskInstruction1: 'Enter the bot and /start',
     taskInstruction2: 'Wait 3 seconds',
     taskInstruction3: 'Press Check',
-    taskWait4: '⏳ Wait 3 seconds',
-    taskReady: '✅ You can check now',
     taskComplete: '🎉 Task completed',
     taskSkipped: '⏭ Task skipped',
     taskCount: (i, total) => `Task ${i}/${total}`,
@@ -556,8 +492,6 @@ const texts = {
     taskInstruction1: 'Зайди в бота и /start',
     taskInstruction2: 'Подожди 3 секунды',
     taskInstruction3: 'Нажми Check',
-    taskWait4: '⏳ Подожди 3 секунды',
-    taskReady: '✅ Теперь можно проверять',
     taskComplete: '🎉 Задание выполнено',
     taskSkipped: '⏭ Задание пропущено',
     taskCount: (i, total) => `Задание ${i}/${total}`,
@@ -862,8 +796,7 @@ bot.on('callback_query', async (q) => {
         );
       }
 
-      const nextText = `${t.taskComplete}\n+${TASK_REWARD}⭐\n\n${taskScreenText(u)}`;
-      return sendTaskScreen(id, u, `${nextText}\n\n`);
+      return sendTaskScreen(id, u, `${t.taskComplete}\n+${TASK_REWARD}⭐\n\n`);
     }
 
     // Task skip
@@ -887,11 +820,14 @@ bot.on('callback_query', async (q) => {
       await safeDelete(id, mid);
 
       if (isTasksFinished(u)) {
-        return sendTextCard(id, `${t.taskSkipped}\n\n${taskScreenText(u)}`, backKeyboard());
+        return sendTextCard(
+          id,
+          `${t.taskSkipped}\n\n${taskScreenText(u)}`,
+          backKeyboard()
+        );
       }
 
-      const nextText = `${t.taskSkipped}\n\n${taskScreenText(u)}`;
-      return sendTaskScreen(id, u, `${nextText}\n\n`);
+      return sendTaskScreen(id, u, `${t.taskSkipped}\n\n`);
     }
 
     // PLAY
@@ -1042,7 +978,6 @@ bot.on('callback_query', async (q) => {
     if (data.startsWith('lang_')) {
       u.lang = data.split('_')[1] || 'tr';
       await saveUser(id, u);
-
       return replaceWithMenu(id, mid, u);
     }
 
