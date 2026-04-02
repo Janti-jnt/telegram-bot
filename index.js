@@ -21,18 +21,17 @@ const BOT_USERNAME = process.env.BOT_USERNAME || '';
 const PORT = process.env.PORT || 3000;
 
 /*
-  Menu photo:
-  Direct image URL required.
-  You can override via env:
-  MENU_PHOTO_URL
+  Menu photo.
+  Must be a direct image URL.
+  You can override it with MENU_PHOTO_URL env var.
 */
 const DEFAULT_MENU_PHOTO_URL = 'https://i.ibb.co/JSLjw7m/B8-D80-FDD-AB82-43-A0-8272-9461-CB1-D932-A.png';
 const MENU_PHOTO_URL = process.env.MENU_PHOTO_URL || DEFAULT_MENU_PHOTO_URL;
 
 /*
-  Activation group:
-  The bot should be in this group.
-  Ideally make the bot admin there.
+  Group activation.
+  The bot should be inside this group.
+  For best reliability, make the bot admin in the group.
 */
 const DEFAULT_ACTIVATION_GROUP_URL = 'https://t.me/Jantistar_chat';
 const ACTIVATION_GROUP_URL = process.env.ACTIVATION_GROUP_URL || DEFAULT_ACTIVATION_GROUP_URL;
@@ -74,10 +73,14 @@ function spin() {
   return 0;
 }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // =========================
-// Keyboard Helpers
+// Keyboard helpers
 // =========================
-function backBtn() {
+function backKeyboard() {
   return {
     inline_keyboard: [[{ text: '🔙', callback_data: 'menu' }]],
   };
@@ -85,7 +88,6 @@ function backBtn() {
 
 function menuKeyboard(u) {
   const t = texts[u.lang] || texts.tr;
-
   return {
     inline_keyboard: [
       [
@@ -128,7 +130,7 @@ function withdrawKeyboard() {
 }
 
 // =========================
-// Activation Helpers
+// Activation helpers
 // =========================
 function activationJoinKeyboard() {
   return {
@@ -169,7 +171,7 @@ async function isUserInActivationGroup(userId) {
 }
 
 // =========================
-// Date / Name Helpers
+// Date / name helpers
 // =========================
 function nowDateTime() {
   const now = new Date();
@@ -196,12 +198,12 @@ function displayName(user, id) {
 }
 
 // =========================
-// Hidden Image For Text Screens
+// Hidden image for text screens
 // =========================
 const TMP_DIR = '/tmp';
 const HIDDEN_PNG_PATH = path.join(TMP_DIR, 'hidden-1x1.png');
 const HIDDEN_PNG_BASE64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAC1HAwCAAC1HAwCAAC0lEQVR42mP8/w8AAgMBApQn6XcAAAAASUVORK5CYII=';
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/w8AAgMBApQn6XcAAAAASUVORK5CYII=';
 
 try {
   if (!fs.existsSync(TMP_DIR)) {
@@ -216,7 +218,7 @@ try {
 }
 
 // =========================
-// Safe Message Helpers
+// Safe message helpers
 // =========================
 async function safeDelete(chatId, messageId) {
   try {
@@ -258,7 +260,7 @@ async function replaceWithText(chatId, messageId, text, keyboard) {
 }
 
 async function sendActivationPrompt(chatId) {
-  return bot.sendMessage(chatId, 'Botu aktif etmek için gruba katılın.', {
+  return bot.sendMessage(chatId, 'Please join the group to activate the bot.', {
     reply_markup: activationJoinKeyboard(),
   });
 }
@@ -270,7 +272,7 @@ async function sendActivationWaiting(chatId) {
 }
 
 // =========================
-// User Storage
+// User storage
 // =========================
 async function getUser(id) {
   let u = await redis.get(`user:${id}`);
@@ -300,7 +302,7 @@ async function saveUser(id, data) {
 }
 
 // =========================
-// Request Storage
+// Request storage
 // =========================
 async function getRequests(id) {
   const r = await redis.get(`req_${id}`);
@@ -380,7 +382,7 @@ const texts = {
 };
 
 // =========================
-// Start + Referral
+// /start
 // =========================
 bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
   try {
@@ -427,7 +429,7 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
       await saveUser(id, u);
     }
 
-    // Ask only once, then never ask again.
+    // Ask only once. After that, never ask again.
     if (!u.activated) {
       if (!u.activation_prompted) {
         u.activation_prompted = true;
@@ -445,7 +447,7 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
 });
 
 // =========================
-// Message Handler
+// Message handler
 // =========================
 bot.on('message', async (msg) => {
   try {
@@ -453,7 +455,7 @@ bot.on('message', async (msg) => {
     let u = await getUser(id);
     if (!u) return;
 
-    // compatibility: web app data support
+    // Keep web_app_data compatibility
     if (msg.web_app_data?.data) {
       let payload = null;
       try {
@@ -478,8 +480,8 @@ bot.on('message', async (msg) => {
     }
 
     const text = (msg.text || '').trim();
-
     if (!u.waiting) return;
+
     if (text.startsWith('/')) return;
     if (!/^\d+$/.test(text)) return;
 
@@ -498,7 +500,7 @@ bot.on('message', async (msg) => {
 });
 
 // =========================
-// Callback Handler
+// Callback handler
 // =========================
 bot.on('callback_query', async (q) => {
   try {
@@ -534,65 +536,70 @@ bot.on('callback_query', async (q) => {
       });
     }
 
-    // Play
+    // PLAY
     if (data === 'play') {
       if (u.stars < SPIN_COST) {
-        return replaceWithText(id, mid, t.noMoney, backBtn());
+        return replaceWithText(id, mid, t.noMoney, backKeyboard());
       }
 
       u.stars -= SPIN_COST;
       await saveUser(id, u);
 
-      await replaceWithText(id, mid, t.spinning, null);
+      // delete current menu and show spinning in a fresh message
+      await safeDelete(id, mid);
+      const spinMsg = await sendTextCard(id, t.spinning, null);
 
-      await new Promise((r) => setTimeout(r, 1000));
+      await delay(1000);
 
       let win = spin();
       if (win > 0) u.stars += win;
 
       await saveUser(id, u);
 
-      return replaceWithText(
+      try {
+        await safeDelete(id, spinMsg.message_id);
+      } catch (e) {}
+
+      return sendTextCard(
         id,
-        mid,
         win > 0 ? `${t.win(win)}\n⭐ ${u.stars}` : `${t.lose}\n⭐ ${u.stars}`,
-        backBtn()
+        backKeyboard()
       );
     }
 
-    // Balance
+    // BALANCE
     if (data === 'balance') {
-      return replaceWithText(id, mid, `⭐ ${u.stars}\n👥 ${u.refs}`, backBtn());
+      return replaceWithText(id, mid, `⭐ ${u.stars}\n👥 ${u.refs}`, backKeyboard());
     }
 
-    // Buy
+    // BUY
     if (data === 'buy') {
       u.waiting = true;
       await saveUser(id, u);
 
-      return replaceWithText(id, mid, t.ask, backBtn());
+      return replaceWithText(id, mid, t.ask, backKeyboard());
     }
 
-    // Ref
+    // REF
     if (data === 'ref') {
       const link = BOT_USERNAME
         ? `https://t.me/${BOT_USERNAME}?start=${id}`
         : `https://t.me/?start=${id}`;
 
-      return replaceWithText(id, mid, `${link}\n👥 ${u.refs}`, backBtn());
+      return replaceWithText(id, mid, `${link}\n👥 ${u.refs}`, backKeyboard());
     }
 
-    // Withdraw menu
+    // WITHDRAW MENU
     if (data === 'withdraw') {
       return replaceWithText(id, mid, t.withdrawMenu, withdrawKeyboard());
     }
 
-    // Create request
+    // CREATE REQUEST
     if (data.startsWith('w_')) {
       const amount = parseInt(data.split('_')[1], 10);
 
       if (!amount || u.stars < amount) {
-        return replaceWithText(id, mid, t.noMoney, backBtn());
+        return replaceWithText(id, mid, t.noMoney, backKeyboard());
       }
 
       u.stars -= amount;
@@ -627,16 +634,16 @@ bot.on('callback_query', async (q) => {
         id,
         mid,
         `#${reqId}\n${amount}⭐\n${date} ${time}\n⏳ ${t.requestPending}`,
-        backBtn()
+        backKeyboard()
       );
     }
 
-    // My requests
+    // MY REQUESTS
     if (data === 'my') {
       const list = await getRequests(id);
 
       if (!list.length) {
-        return replaceWithText(id, mid, t.myEmpty, backBtn());
+        return replaceWithText(id, mid, t.myEmpty, backKeyboard());
       }
 
       let text = '';
@@ -645,15 +652,15 @@ bot.on('callback_query', async (q) => {
         text += `#${r.id} - ${r.amount}⭐ - ${status}\n`;
       }
 
-      return replaceWithText(id, mid, text.trim(), backBtn());
+      return replaceWithText(id, mid, text.trim(), backKeyboard());
     }
 
-    // Leaderboard
+    // LEADERBOARD
     if (data === 'top') {
       const top = await redis.zrange('leaderboard', 0, 9, { rev: true });
 
       if (!top || !top.length) {
-        return replaceWithText(id, mid, t.topEmpty, backBtn());
+        return replaceWithText(id, mid, t.topEmpty, backKeyboard());
       }
 
       let text = `${t.top}\n\n`;
@@ -674,15 +681,13 @@ bot.on('callback_query', async (q) => {
         text += `${i + 1}. ${name} - ⭐ ${user?.stars || 0}\n`;
       }
 
-      return replaceWithText(id, mid, text.trim(), backBtn());
+      return replaceWithText(id, mid, text.trim(), backKeyboard());
     }
 
-    // Language menu
+    // LANGUAGE MENU
     if (data === 'lang') {
       await safeDelete(id, mid);
-      return sendTextCard(id, '🌍', {
-        inline_keyboard: langKeyboard(),
-      });
+      return sendTextCard(id, '🌍 Select language', langKeyboard());
     }
 
     if (data.startsWith('lang_')) {
@@ -692,9 +697,21 @@ bot.on('callback_query', async (q) => {
       return replaceWithMenu(id, mid, u);
     }
 
-    // Menu
+    // MENU
     if (data === 'menu') {
-      return replaceWithMenu(id, mid, u);
+      if (u.activated) {
+        return replaceWithMenu(id, mid, u);
+      }
+
+      // If somehow a non-activated user reaches back, keep them gated.
+      if (!u.activation_prompted) {
+        u.activation_prompted = true;
+        await saveUser(id, u);
+        await safeDelete(id, mid);
+        return sendActivationPrompt(id);
+      }
+
+      return sendActivationWaiting(id);
     }
   } catch (err) {
     console.error('CALLBACK ERROR:', err);
