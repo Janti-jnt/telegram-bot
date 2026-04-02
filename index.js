@@ -23,6 +23,8 @@ const PORT = process.env.PORT || 3000;
 /*
   Menu photo:
   Direct image URL required.
+  You can override via env:
+  MENU_PHOTO_URL
 */
 const DEFAULT_MENU_PHOTO_URL = 'https://i.ibb.co/JSLjw7m/B8-D80-FDD-AB82-43-A0-8272-9461-CB1-D932-A.png';
 const MENU_PHOTO_URL = process.env.MENU_PHOTO_URL || DEFAULT_MENU_PHOTO_URL;
@@ -43,7 +45,9 @@ const redis = new Redis({
 
 const SPIN_COST = 50;
 
-// 🎯 Rewards
+// =========================
+// Rewards
+// =========================
 const rewards = [
   { amount: 5, chance: 26 },
   { amount: 10, chance: 14 },
@@ -61,23 +65,27 @@ const rewards = [
 function spin() {
   let r = Math.random() * 100;
   let sum = 0;
+
   for (const item of rewards) {
     sum += item.chance;
     if (r <= sum) return item.amount;
   }
+
   return 0;
 }
 
+// =========================
+// Keyboard Helpers
+// =========================
 function backBtn() {
   return {
-    reply_markup: {
-      inline_keyboard: [[{ text: '🔙', callback_data: 'menu' }]],
-    },
+    inline_keyboard: [[{ text: '🔙', callback_data: 'menu' }]],
   };
 }
 
 function menuKeyboard(u) {
   const t = texts[u.lang] || texts.tr;
+
   return {
     inline_keyboard: [
       [
@@ -119,49 +127,24 @@ function withdrawKeyboard() {
   };
 }
 
-function buildActivationUrl() {
-  const base = ACTIVATION_GROUP_URL;
-  return base;
-}
-
-function activationKeyboardFull() {
+// =========================
+// Activation Helpers
+// =========================
+function activationJoinKeyboard() {
   return {
     inline_keyboard: [
-      [{ text: '👥 Join Group', url: buildActivationUrl() }],
+      [{ text: '👥 Join Group', url: ACTIVATION_GROUP_URL }],
       [{ text: '✅ Check', callback_data: 'check_activation' }],
     ],
   };
 }
 
-function activationKeyboardCheckOnly() {
+function activationCheckKeyboard() {
   return {
     inline_keyboard: [
       [{ text: '✅ Check', callback_data: 'check_activation' }],
     ],
   };
-}
-
-function nowDateTime() {
-  const now = new Date();
-  return {
-    date: now.toLocaleDateString(),
-    time: now.toLocaleTimeString(),
-  };
-}
-
-function displayName(user, id) {
-  if (!user) return String(id);
-
-  if (user.username && user.username !== 'user') {
-    return `@${user.username}`;
-  }
-
-  const first = user.first_name || '';
-  const last = user.last_name || '';
-  const full = `${first} ${last}`.trim();
-  if (full) return full;
-
-  return String(id);
 }
 
 async function isUserInActivationGroup(userId) {
@@ -185,9 +168,56 @@ async function isUserInActivationGroup(userId) {
   }
 }
 
-/* =========================
-   PHOTO/SCREEN HELPERS
-========================= */
+// =========================
+// Date / Name Helpers
+// =========================
+function nowDateTime() {
+  const now = new Date();
+  return {
+    date: now.toLocaleDateString(),
+    time: now.toLocaleTimeString(),
+  };
+}
+
+function displayName(user, id) {
+  if (!user) return String(id);
+
+  if (user.username && user.username !== 'user') {
+    return `@${user.username}`;
+  }
+
+  const first = user.first_name || '';
+  const last = user.last_name || '';
+  const full = `${first} ${last}`.trim();
+
+  if (full) return full;
+
+  return String(id);
+}
+
+// =========================
+// Hidden Image For Text Screens
+// =========================
+const TMP_DIR = '/tmp';
+const HIDDEN_PNG_PATH = path.join(TMP_DIR, 'hidden-1x1.png');
+const HIDDEN_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAC1HAwCAAC1HAwCAAC0lEQVR42mP8/w8AAgMBApQn6XcAAAAASUVORK5CYII=';
+
+try {
+  if (!fs.existsSync(TMP_DIR)) {
+    fs.mkdirSync(TMP_DIR, { recursive: true });
+  }
+
+  if (!fs.existsSync(HIDDEN_PNG_PATH)) {
+    fs.writeFileSync(HIDDEN_PNG_PATH, Buffer.from(HIDDEN_PNG_BASE64, 'base64'));
+  }
+} catch (err) {
+  console.error('HIDDEN PNG INIT ERROR:', err);
+}
+
+// =========================
+// Safe Message Helpers
+// =========================
 async function safeDelete(chatId, messageId) {
   try {
     await bot.deleteMessage(chatId, String(messageId));
@@ -201,16 +231,12 @@ async function sendMenuCard(chatId, u, prefix = '') {
   try {
     return await bot.sendPhoto(chatId, MENU_PHOTO_URL, {
       caption,
-      reply_markup: {
-        inline_keyboard: menuKeyboard(u),
-      },
+      reply_markup: menuKeyboard(u),
     });
   } catch (err) {
     console.error('SEND MENU PHOTO FAILED, fallback to text:', err?.message || err);
     return bot.sendMessage(chatId, caption, {
-      reply_markup: {
-        inline_keyboard: menuKeyboard(u),
-      },
+      reply_markup: menuKeyboard(u),
     });
   }
 }
@@ -231,21 +257,21 @@ async function replaceWithText(chatId, messageId, text, keyboard) {
   return sendTextCard(chatId, text, keyboard);
 }
 
-async function sendActivationPrompt(chatId, u) {
+async function sendActivationPrompt(chatId) {
   return bot.sendMessage(chatId, 'Botu aktif etmek için gruba katılın.', {
-    reply_markup: activationKeyboardFull(),
+    reply_markup: activationJoinKeyboard(),
   });
 }
 
 async function sendActivationWaiting(chatId) {
   return bot.sendMessage(chatId, '⏳ Activation pending.', {
-    reply_markup: activationKeyboardCheckOnly(),
+    reply_markup: activationCheckKeyboard(),
   });
 }
 
-/* =========================
-   USER STORAGE
-========================= */
+// =========================
+// User Storage
+// =========================
 async function getUser(id) {
   let u = await redis.get(`user:${id}`);
   if (!u) return null;
@@ -273,9 +299,9 @@ async function saveUser(id, data) {
   });
 }
 
-/* =========================
-   REQUEST STORAGE
-========================= */
+// =========================
+// Request Storage
+// =========================
 async function getRequests(id) {
   const r = await redis.get(`req_${id}`);
   return r || [];
@@ -287,9 +313,9 @@ async function saveRequest(id, data) {
   await redis.set(`req_${id}`, list);
 }
 
-/* =========================
-   TEXTS
-========================= */
+// =========================
+// Texts
+// =========================
 const texts = {
   tr: {
     menu: '🎰 Menü',
@@ -353,9 +379,9 @@ const texts = {
   },
 };
 
-/* =========================
-   START
-========================= */
+// =========================
+// Start + Referral
+// =========================
 bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
   try {
     const id = msg.chat.id;
@@ -401,11 +427,12 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
       await saveUser(id, u);
     }
 
+    // Ask only once, then never ask again.
     if (!u.activated) {
       if (!u.activation_prompted) {
         u.activation_prompted = true;
         await saveUser(id, u);
-        return sendActivationPrompt(id, u);
+        return sendActivationPrompt(id);
       }
 
       return sendActivationWaiting(id);
@@ -417,16 +444,16 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
   }
 });
 
-/* =========================
-   MESSAGE HANDLER
-========================= */
+// =========================
+// Message Handler
+// =========================
 bot.on('message', async (msg) => {
   try {
     const id = msg.chat.id;
     let u = await getUser(id);
     if (!u) return;
 
-    // Mini App activation data (kept for compatibility)
+    // compatibility: web app data support
     if (msg.web_app_data?.data) {
       let payload = null;
       try {
@@ -451,8 +478,9 @@ bot.on('message', async (msg) => {
     }
 
     const text = (msg.text || '').trim();
-    if (!u.waiting) return;
 
+    if (!u.waiting) return;
+    if (text.startsWith('/')) return;
     if (!/^\d+$/.test(text)) return;
 
     const n = parseInt(text, 10);
@@ -469,9 +497,9 @@ bot.on('message', async (msg) => {
   }
 });
 
-/* =========================
-   CALLBACKS
-========================= */
+// =========================
+// Callback Handler
+// =========================
 bot.on('callback_query', async (q) => {
   try {
     await bot.answerCallbackQuery(q.id);
@@ -506,7 +534,7 @@ bot.on('callback_query', async (q) => {
       });
     }
 
-    // PLAY
+    // Play
     if (data === 'play') {
       if (u.stars < SPIN_COST) {
         return replaceWithText(id, mid, t.noMoney, backBtn());
@@ -532,12 +560,12 @@ bot.on('callback_query', async (q) => {
       );
     }
 
-    // BALANCE
+    // Balance
     if (data === 'balance') {
       return replaceWithText(id, mid, `⭐ ${u.stars}\n👥 ${u.refs}`, backBtn());
     }
 
-    // BUY
+    // Buy
     if (data === 'buy') {
       u.waiting = true;
       await saveUser(id, u);
@@ -545,7 +573,7 @@ bot.on('callback_query', async (q) => {
       return replaceWithText(id, mid, t.ask, backBtn());
     }
 
-    // REF
+    // Ref
     if (data === 'ref') {
       const link = BOT_USERNAME
         ? `https://t.me/${BOT_USERNAME}?start=${id}`
@@ -554,12 +582,12 @@ bot.on('callback_query', async (q) => {
       return replaceWithText(id, mid, `${link}\n👥 ${u.refs}`, backBtn());
     }
 
-    // WITHDRAW MENU
+    // Withdraw menu
     if (data === 'withdraw') {
       return replaceWithText(id, mid, t.withdrawMenu, withdrawKeyboard());
     }
 
-    // CREATE REQUEST
+    // Create request
     if (data.startsWith('w_')) {
       const amount = parseInt(data.split('_')[1], 10);
 
@@ -603,7 +631,7 @@ bot.on('callback_query', async (q) => {
       );
     }
 
-    // MY REQUESTS
+    // My requests
     if (data === 'my') {
       const list = await getRequests(id);
 
@@ -620,7 +648,7 @@ bot.on('callback_query', async (q) => {
       return replaceWithText(id, mid, text.trim(), backBtn());
     }
 
-    // LEADERBOARD
+    // Leaderboard
     if (data === 'top') {
       const top = await redis.zrange('leaderboard', 0, 9, { rev: true });
 
@@ -649,7 +677,7 @@ bot.on('callback_query', async (q) => {
       return replaceWithText(id, mid, text.trim(), backBtn());
     }
 
-    // LANG MENU
+    // Language menu
     if (data === 'lang') {
       await safeDelete(id, mid);
       return sendTextCard(id, '🌍', {
@@ -664,7 +692,7 @@ bot.on('callback_query', async (q) => {
       return replaceWithMenu(id, mid, u);
     }
 
-    // MENU
+    // Menu
     if (data === 'menu') {
       return replaceWithMenu(id, mid, u);
     }
@@ -673,9 +701,9 @@ bot.on('callback_query', async (q) => {
   }
 });
 
-/* =========================
-   SERVER
-========================= */
+// =========================
+// Server
+// =========================
 app.post(`/bot${process.env.BOT_TOKEN}`, (req, res) => {
   bot.processUpdate(req.body);
   res.sendStatus(200);
