@@ -27,13 +27,11 @@ const DEFAULT_MENU_PHOTO_URL = 'https://i.ibb.co/JSLjw7m/B8-D80-FDD-AB82-43-A0-8
 const MENU_PHOTO_URL = process.env.MENU_PHOTO_URL || DEFAULT_MENU_PHOTO_URL;
 
 /*
-  Activation group.
-  The bot should be inside this group.
-  Ideally make the bot admin in the group.
+  Chat link.
+  You can reuse your group/chat link here.
 */
-const DEFAULT_ACTIVATION_GROUP_URL = 'https://t.me/Jantistar_chat';
-const ACTIVATION_GROUP_URL = process.env.ACTIVATION_GROUP_URL || DEFAULT_ACTIVATION_GROUP_URL;
-const ACTIVATION_GROUP_CHAT_ID = process.env.ACTIVATION_GROUP_CHAT_ID || '@Jantistar_chat';
+const DEFAULT_CHAT_URL = 'https://t.me/Jantistar_chat';
+const CHAT_URL = process.env.CHAT_URL || DEFAULT_CHAT_URL;
 
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
@@ -108,14 +106,12 @@ function getTaskIndex(u) {
 function currentTask(u) {
   const idx = getTaskIndex(u);
 
-  // First: return the next pending task from the current cursor
   for (let i = idx; i < TASKS.length; i++) {
     const task = TASKS[i];
     const st = taskState(u, task.id);
     if (st === 'pending') return task;
   }
 
-  // Then: when pending tasks are done, revisit skipped ones
   for (let i = 0; i < TASKS.length; i++) {
     const task = TASKS[i];
     const st = taskState(u, task.id);
@@ -177,15 +173,16 @@ function menuKeyboard(u) {
       [
         { text: t.play, callback_data: 'play' },
         { text: t.balance, callback_data: 'balance' },
+        { text: t.tasks, callback_data: 'tasks' },
       ],
       [
         { text: t.ref, callback_data: 'ref' },
+        { text: t.chat, url: CHAT_URL },
         { text: t.withdraw, callback_data: 'withdraw' },
-        { text: t.my, callback_data: 'my' },
       ],
       [
+        { text: t.my, callback_data: 'my' },
         { text: t.top, callback_data: 'top' },
-        { text: t.tasks, callback_data: 'tasks' },
         { text: t.lang, callback_data: 'lang' },
       ],
     ],
@@ -198,6 +195,7 @@ function langKeyboard() {
       [{ text: '🇹🇷 TR', callback_data: 'lang_tr' }],
       [{ text: '🇬🇧 EN', callback_data: 'lang_en' }],
       [{ text: '🇷🇺 RU', callback_data: 'lang_ru' }],
+      [{ text: '🔙', callback_data: 'menu' }],
     ],
   };
 }
@@ -211,47 +209,6 @@ function withdrawKeyboard() {
       [{ text: '🔙', callback_data: 'menu' }],
     ],
   };
-}
-
-function activationJoinKeyboard() {
-  return {
-    inline_keyboard: [
-      [{ text: '👥 Join Group', url: ACTIVATION_GROUP_URL }],
-      [{ text: '✅ Check', callback_data: 'check_activation' }],
-    ],
-  };
-}
-
-function activationCheckKeyboard() {
-  return {
-    inline_keyboard: [
-      [{ text: '✅ Check', callback_data: 'check_activation' }],
-    ],
-  };
-}
-
-// ======================================================
-// Activation helpers
-// ======================================================
-async function isUserInActivationGroup(userId) {
-  try {
-    const member = await bot.getChatMember(ACTIVATION_GROUP_CHAT_ID, userId);
-    if (!member) return false;
-
-    const status = member.status || '';
-    if (status === 'creator' || status === 'administrator' || status === 'member') {
-      return true;
-    }
-
-    if (status === 'restricted' && member.is_member) {
-      return true;
-    }
-
-    return false;
-  } catch (err) {
-    console.error('GROUP CHECK ERROR:', err?.message || err);
-    return false;
-  }
 }
 
 // ======================================================
@@ -323,18 +280,6 @@ async function replaceWithText(chatId, messageId, text, keyboard) {
   return sendTextCard(chatId, text, keyboard);
 }
 
-async function sendActivationPrompt(chatId) {
-  return bot.sendMessage(chatId, 'Please join the group to activate the bot.', {
-    reply_markup: activationJoinKeyboard(),
-  });
-}
-
-async function sendActivationWaiting(chatId) {
-  return bot.sendMessage(chatId, '⏳ Activation pending.', {
-    reply_markup: activationCheckKeyboard(),
-  });
-}
-
 // ======================================================
 // User storage
 // ======================================================
@@ -349,9 +294,6 @@ async function getUser(id) {
   if (!u.username) u.username = 'user';
   if (!u.first_name) u.first_name = '';
   if (!u.last_name) u.last_name = '';
-  if (typeof u.activated !== 'boolean') u.activated = false;
-  if (typeof u.activation_prompted !== 'boolean') u.activation_prompted = false;
-  if (!u.activation_token) u.activation_token = null;
   if (!Number.isInteger(u.task_index)) u.task_index = 0;
   if (!Number.isFinite(u.task_started_at)) u.task_started_at = 0;
   if (typeof u.task_states !== 'object' || u.task_states === null) u.task_states = {};
@@ -392,6 +334,7 @@ const texts = {
     play: '🎮 Oyna (50⭐)',
     balance: '⭐ Bakiye',
     ref: '👥 Davet',
+    chat: '💬 Chat',
     withdraw: '💸 Çek',
     my: '📄 Taleplerim',
     top: '🏆 Liderler',
@@ -423,6 +366,7 @@ const texts = {
     taskNoMore: 'Görev listesi sona erdi',
     taskFinished: '✅ Tüm görevler tamamlandı',
     taskNoTask: '❌ Görev kalmadı',
+    taskWait3: '⏳ 3 saniye bekle',
   },
 
   en: {
@@ -430,6 +374,7 @@ const texts = {
     play: '🎮 Play (50⭐)',
     balance: '⭐ Balance',
     ref: '👥 Invite',
+    chat: '💬 Chat',
     withdraw: '💸 Withdraw',
     my: '📄 My requests',
     top: '🏆 Leaderboard',
@@ -461,6 +406,7 @@ const texts = {
     taskNoMore: 'No more tasks left',
     taskFinished: '✅ All tasks completed',
     taskNoTask: '❌ No task left',
+    taskWait3: '⏳ Wait 3 seconds',
   },
 
   ru: {
@@ -468,6 +414,7 @@ const texts = {
     play: '🎮 Играть (50⭐)',
     balance: '⭐ Баланс',
     ref: '👥 Пригласить',
+    chat: '💬 Чат',
     withdraw: '💸 Вывод',
     my: '📄 Мои заявки',
     top: '🏆 Топ',
@@ -499,6 +446,7 @@ const texts = {
     taskNoMore: 'Задания закончились',
     taskFinished: '✅ Все задания выполнены',
     taskNoTask: '❌ Заданий не осталось',
+    taskWait3: '⏳ Подожди 3 секунды',
   },
 };
 
@@ -594,9 +542,6 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
         first_name: firstName,
         last_name: lastName,
         waiting: false,
-        activated: false,
-        activation_prompted: false,
-        activation_token: `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
         task_index: 0,
         task_started_at: 0,
         task_states: {},
@@ -618,24 +563,11 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
       u.first_name = firstName;
       u.last_name = lastName;
       if (!u.lang) u.lang = 'tr';
-      if (!u.activation_token) {
-        u.activation_token = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-      }
       if (!Number.isInteger(u.task_index)) u.task_index = 0;
       if (!Number.isFinite(u.task_started_at)) u.task_started_at = 0;
       if (typeof u.task_states !== 'object' || u.task_states === null) u.task_states = {};
       if (!Number.isInteger(u.task_active_task_id)) u.task_active_task_id = 0;
       await saveUser(id, u);
-    }
-
-    if (!u.activated) {
-      if (!u.activation_prompted) {
-        u.activation_prompted = true;
-        await saveUser(id, u);
-        return sendActivationPrompt(id);
-      }
-
-      return sendActivationWaiting(id);
     }
 
     return sendMenuCard(id, u);
@@ -652,29 +584,6 @@ bot.on('message', async (msg) => {
     const id = msg.chat.id;
     let u = await getUser(id);
     if (!u) return;
-
-    if (msg.web_app_data?.data) {
-      let payload = null;
-      try {
-        payload = JSON.parse(msg.web_app_data.data);
-      } catch (e) {
-        payload = { raw: msg.web_app_data.data };
-      }
-
-      if (
-        payload &&
-        (payload.type === 'activated' || payload.action === 'activated') &&
-        payload.token &&
-        payload.token === u.activation_token
-      ) {
-        u.activated = true;
-        u.activation_prompted = true;
-        await saveUser(id, u);
-        return sendMenuCard(id, u, '✅ Activation completed\n\n');
-      }
-
-      return;
-    }
 
     const text = (msg.text || '').trim();
     if (!u.waiting) return;
@@ -713,46 +622,13 @@ bot.on('callback_query', async (q) => {
 
     const t = texts[u.lang] || texts.tr;
 
-    // Activation check
-    if (data === 'check_activation') {
-      const inGroup = await isUserInActivationGroup(id);
-
-      if (inGroup) {
-        u.activated = true;
-        u.activation_prompted = true;
-        await saveUser(id, u);
-
-        await safeDelete(id, mid);
-        return sendMenuCard(id, u);
-      }
-
-      return bot.answerCallbackQuery(q.id, {
-        text: 'Please join the group first.',
-        show_alert: true,
-      });
-    }
-
     // Tasks entry
     if (data === 'tasks') {
-      if (!u.activated) {
-        return bot.answerCallbackQuery(q.id, {
-          text: 'Activate first.',
-          show_alert: true,
-        });
-      }
-
       return replaceWithText(id, mid, taskScreenText(u), taskKeyboardForUser(u));
     }
 
     // Task check
     if (data === 'task_check') {
-      if (!u.activated) {
-        return bot.answerCallbackQuery(q.id, {
-          text: 'Activate first.',
-          show_alert: true,
-        });
-      }
-
       const task = currentTask(u);
       if (!task) {
         return replaceWithText(id, mid, taskScreenText(u), backKeyboard());
@@ -766,7 +642,7 @@ bot.on('callback_query', async (q) => {
         await saveUser(id, u);
 
         return bot.answerCallbackQuery(q.id, {
-          text: t.taskWait4,
+          text: t.taskWait3,
           show_alert: true,
         });
       }
@@ -776,7 +652,7 @@ bot.on('callback_query', async (q) => {
       if (elapsed < TASK_WAIT_MS) {
         const remaining = Math.ceil((TASK_WAIT_MS - elapsed) / 1000);
         return bot.answerCallbackQuery(q.id, {
-          text: `${t.taskWait4} (${remaining}s)`,
+          text: `${t.taskWait3} (${remaining}s)`,
           show_alert: true,
         });
       }
@@ -801,13 +677,6 @@ bot.on('callback_query', async (q) => {
 
     // Task skip
     if (data === 'task_skip') {
-      if (!u.activated) {
-        return bot.answerCallbackQuery(q.id, {
-          text: 'Activate first.',
-          show_alert: true,
-        });
-      }
-
       const task = currentTask(u);
       if (!task) {
         return replaceWithText(id, mid, taskScreenText(u), backKeyboard());
