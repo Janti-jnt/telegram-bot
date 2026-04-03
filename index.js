@@ -387,7 +387,6 @@ const texts = {
     myEmpty: '❌ Henüz talep yok',
     topEmpty: '❌ Liste boş',
     refNote: '👥 Her arkadaş için +1.5⭐ (kişi başı sadece 1 kez)',
-
     taskTitle: 'Görev',
     taskOpen: '🚀 Botu Aç',
     taskCheck: '✅ Kontrol Et',
@@ -429,7 +428,6 @@ const texts = {
     myEmpty: '❌ No requests yet',
     topEmpty: '❌ Leaderboard is empty',
     refNote: '👥 +1.5⭐ for each friend (only once per user)',
-
     taskTitle: 'Task',
     taskOpen: '🚀 Open Bot',
     taskCheck: '✅ Check',
@@ -471,7 +469,6 @@ const texts = {
     myEmpty: '❌ Заявок пока нет',
     topEmpty: '❌ Топ пуст',
     refNote: '👥 +1.5⭐ за каждого друга (только 1 раз на пользователя)',
-
     taskTitle: 'Задание',
     taskOpen: '🚀 Открыть бот',
     taskCheck: '✅ Проверить',
@@ -661,10 +658,6 @@ bot.on('message', async (msg) => {
 // ======================================================
 bot.on('callback_query', async (q) => {
   try {
-    await bot.answerCallbackQuery(q.id);
-  } catch (e) {}
-
-  try {
     const id = q.message.chat.id;
     const mid = q.message.message_id;
     const data = q.data;
@@ -674,15 +667,10 @@ bot.on('callback_query', async (q) => {
 
     const t = texts[u.lang] || texts.tr;
 
-    // Tasks entry
-    if (data === 'tasks') {
-      return replaceWithText(id, mid, taskScreenText(u), taskKeyboardForUser(u));
-    }
-
-    // Open bot + start timer in one tap
     if (data === 'task_open') {
       const task = currentTask(u);
       if (!task) {
+        await bot.answerCallbackQuery(q.id);
         return replaceWithText(id, mid, taskScreenText(u), backKeyboard());
       }
 
@@ -695,7 +683,12 @@ bot.on('callback_query', async (q) => {
       });
     }
 
-    // Task check
+    await bot.answerCallbackQuery(q.id);
+
+    if (data === 'tasks') {
+      return replaceWithText(id, mid, taskScreenText(u), taskKeyboardForUser(u));
+    }
+
     if (data === 'task_check') {
       const task = currentTask(u);
       if (!task) {
@@ -741,7 +734,6 @@ bot.on('callback_query', async (q) => {
       return sendTaskScreen(id, u, `${t.taskComplete}\n+${TASK_REWARD}⭐\n\n`);
     }
 
-    // Task skip
     if (data === 'task_skip') {
       const task = currentTask(u);
       if (!task) {
@@ -766,7 +758,6 @@ bot.on('callback_query', async (q) => {
       return sendTaskScreen(id, u, `${t.taskSkipped}\n\n`);
     }
 
-    // PLAY
     if (data === 'play') {
       if (u.stars < SPIN_COST) {
         return replaceWithText(id, mid, t.noMoney, backKeyboard());
@@ -796,12 +787,10 @@ bot.on('callback_query', async (q) => {
       );
     }
 
-    // BALANCE
     if (data === 'balance') {
       return replaceWithText(id, mid, `⭐ ${u.stars}\n👥 ${u.refs}`, backKeyboard());
     }
 
-    // REF
     if (data === 'ref') {
       const link = BOT_USERNAME
         ? `https://t.me/${BOT_USERNAME}?start=${id}`
@@ -815,12 +804,10 @@ bot.on('callback_query', async (q) => {
       );
     }
 
-    // WITHDRAW MENU
     if (data === 'withdraw') {
       return replaceWithText(id, mid, t.withdrawMenu, withdrawKeyboard());
     }
 
-    // CREATE REQUEST
     if (data.startsWith('w_')) {
       const amount = parseInt(data.split('_')[1], 10);
 
@@ -864,7 +851,6 @@ bot.on('callback_query', async (q) => {
       );
     }
 
-    // MY REQUESTS
     if (data === 'my') {
       const list = await getRequests(id);
 
@@ -881,7 +867,6 @@ bot.on('callback_query', async (q) => {
       return replaceWithText(id, mid, text.trim(), backKeyboard());
     }
 
-    // LEADERBOARD
     if (data === 'top') {
       const top = await redis.zrange('leaderboard', 0, 9, { rev: true });
 
@@ -910,7 +895,6 @@ bot.on('callback_query', async (q) => {
       return replaceWithText(id, mid, text.trim(), backKeyboard());
     }
 
-    // LANGUAGE MENU
     if (data === 'lang') {
       await safeDelete(id, mid);
       return sendTextCard(id, '🌍 Select language', langKeyboard());
@@ -922,7 +906,6 @@ bot.on('callback_query', async (q) => {
       return replaceWithMenu(id, mid, u);
     }
 
-    // MENU
     if (data === 'menu') {
       return replaceWithMenu(id, mid, u);
     }
