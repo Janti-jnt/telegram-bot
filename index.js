@@ -223,6 +223,28 @@ function withdrawKeyboard() {
   };
 }
 
+function taskKeyboardForUser(u, opened = false) {
+  const t = texts[u.lang] || texts.tr;
+  const task = currentTask(u);
+
+  if (!task) {
+    return {
+      inline_keyboard: [[{ text: t.taskBack, callback_data: 'menu' }]],
+    };
+  }
+
+  return {
+    inline_keyboard: [
+      opened
+        ? [{ text: t.taskOpenUrl, url: task.url }]
+        : [{ text: t.taskOpen, callback_data: 'task_open' }],
+      [{ text: t.taskCheck, callback_data: 'task_check' }],
+      [{ text: t.taskSkip, callback_data: 'task_skip' }],
+      [{ text: t.taskBack, callback_data: 'menu' }],
+    ],
+  };
+}
+
 // ======================================================
 // Date / name helpers
 // ======================================================
@@ -370,6 +392,7 @@ const texts = {
 
     taskTitle: 'Görev',
     taskOpen: '🚀 Botu Aç',
+    taskOpenUrl: '🚀 Botu Aç',
     taskCheck: '✅ Kontrol Et',
     taskSkip: '⏭ Görevi Geç',
     taskBack: '🔙 Geri',
@@ -385,6 +408,8 @@ const texts = {
     taskFinished: '✅ Tüm görevler tamamlandı',
     taskNoTask: '❌ Görev kalmadı',
     taskWait3: '⏳ 3 saniye bekle',
+    taskOpenFirst: 'Önce botu aç',
+    taskOpened: '🚀 Sayaç başladı. Botu aç ve 3 saniye bekle.',
   },
 
   en: {
@@ -411,6 +436,7 @@ const texts = {
 
     taskTitle: 'Task',
     taskOpen: '🚀 Open Bot',
+    taskOpenUrl: '🚀 Open Bot',
     taskCheck: '✅ Check',
     taskSkip: '⏭ Skip',
     taskBack: '🔙 Back',
@@ -426,6 +452,8 @@ const texts = {
     taskFinished: '✅ All tasks completed',
     taskNoTask: '❌ No task left',
     taskWait3: '⏳ Wait 3 seconds',
+    taskOpenFirst: 'Open the bot first',
+    taskOpened: '🚀 Timer started. Open the bot and wait 3 seconds.',
   },
 
   ru: {
@@ -452,6 +480,7 @@ const texts = {
 
     taskTitle: 'Задание',
     taskOpen: '🚀 Открыть бот',
+    taskOpenUrl: '🚀 Открыть бот',
     taskCheck: '✅ Проверить',
     taskSkip: '⏭ Пропустить',
     taskBack: '🔙 Назад',
@@ -467,6 +496,8 @@ const texts = {
     taskFinished: '✅ Все задания выполнены',
     taskNoTask: '❌ Заданий не осталось',
     taskWait3: '⏳ Подожди 3 секунды',
+    taskOpenFirst: 'Сначала открой бота',
+    taskOpened: '🚀 Таймер запущен. Открой бота и подожди 3 секунды.',
   },
 };
 
@@ -506,7 +537,7 @@ function taskScreenText(u) {
   return lines.join('\n');
 }
 
-function taskKeyboardForUser(u) {
+function taskKeyboardForUser(u, opened = false) {
   const t = texts[u.lang] || texts.tr;
   const task = currentTask(u);
 
@@ -518,7 +549,9 @@ function taskKeyboardForUser(u) {
 
   return {
     inline_keyboard: [
-      [{ text: t.taskOpen, url: task.url }],
+      opened
+        ? [{ text: t.taskOpenUrl, url: task.url }]
+        : [{ text: t.taskOpen, callback_data: 'task_open' }],
       [{ text: t.taskCheck, callback_data: 'task_check' }],
       [{ text: t.taskSkip, callback_data: 'task_skip' }],
       [{ text: t.taskBack, callback_data: 'menu' }],
@@ -533,11 +566,7 @@ async function sendTaskScreen(chatId, u, prefix = '') {
     return sendTextCard(chatId, `${prefix}${taskScreenText(u)}`, backKeyboard());
   }
 
-  setTaskStartTime(u, task.id, Date.now());
-  u.task_active_task_id = task.id;
-  await saveUser(chatId, u);
-
-  return sendTextCard(chatId, `${prefix}${taskScreenText(u)}`, taskKeyboardForUser(u));
+  return sendTextCard(chatId, `${prefix}${taskScreenText(u)}`, taskKeyboardForUser(u, false));
 }
 
 // ======================================================
@@ -552,6 +581,7 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
     const lastName = msg.from?.last_name || '';
 
     let u = await getUser(id);
+    const isNewUser = !u;
 
     if (!u) {
       u = {
@@ -589,8 +619,8 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
       await saveUser(id, u);
     }
 
-    // Referral bonus only once, and only for brand-new users.
-    if (ref && ref !== String(id) && !u.ref_rewarded && !u.referred_by) {
+    // Referral bonus only once, only for brand-new accounts.
+    if (isNewUser && ref && ref !== String(id)) {
       const refUser = await getUser(ref);
       if (refUser) {
         refUser.stars += 1.5;
@@ -655,12 +685,28 @@ bot.on('callback_query', async (q) => {
 
     const t = texts[u.lang] || texts.tr;
 
-    // Tasks entry
     if (data === 'tasks') {
-      return replaceWithText(id, mid, taskScreenText(u), taskKeyboardForUser(u));
+      return replaceWithText(id, mid, taskScreenText(u), taskKeyboardForUser(u, false));
     }
 
-    // Task check
+    if (data === 'task_open') {
+      const task = currentTask(u);
+      if (!task) {
+        return replaceWithText(id, mid, taskScreenText(u), backKeyboard());
+      }
+
+      setTaskStartTime(u, task.id, Date.now());
+      u.task_active_task_id = task.id;
+      await saveUser(id, u);
+
+      await safeDelete(id, mid);
+      return sendTextCard(
+        id,
+        `${t.taskOpened}\n\n${taskScreenText(u)}`,
+        taskKeyboardForUser(u, true)
+      );
+    }
+
     if (data === 'task_check') {
       const task = currentTask(u);
       if (!task) {
@@ -670,14 +716,9 @@ bot.on('callback_query', async (q) => {
       const activeId = Number.isInteger(u.task_active_task_id) ? u.task_active_task_id : 0;
       const startedAt = getTaskStartTime(u, task.id);
 
-      // If this task has never started, start its timer now.
       if (!startedAt || activeId !== task.id) {
-        setTaskStartTime(u, task.id, Date.now());
-        u.task_active_task_id = task.id;
-        await saveUser(id, u);
-
         return bot.answerCallbackQuery(q.id, {
-          text: t.taskWait3,
+          text: t.taskOpenFirst,
           show_alert: true,
         });
       }
@@ -711,7 +752,6 @@ bot.on('callback_query', async (q) => {
       return sendTaskScreen(id, u, `${t.taskComplete}\n+${TASK_REWARD}⭐\n\n`);
     }
 
-    // Task skip
     if (data === 'task_skip') {
       const task = currentTask(u);
       if (!task) {
@@ -736,7 +776,6 @@ bot.on('callback_query', async (q) => {
       return sendTaskScreen(id, u, `${t.taskSkipped}\n\n`);
     }
 
-    // PLAY
     if (data === 'play') {
       if (u.stars < SPIN_COST) {
         return replaceWithText(id, mid, t.noMoney, backKeyboard());
@@ -766,12 +805,10 @@ bot.on('callback_query', async (q) => {
       );
     }
 
-    // BALANCE
     if (data === 'balance') {
       return replaceWithText(id, mid, `⭐ ${u.stars}\n👥 ${u.refs}`, backKeyboard());
     }
 
-    // REF
     if (data === 'ref') {
       const link = BOT_USERNAME
         ? `https://t.me/${BOT_USERNAME}?start=${id}`
@@ -785,12 +822,10 @@ bot.on('callback_query', async (q) => {
       );
     }
 
-    // WITHDRAW MENU
     if (data === 'withdraw') {
       return replaceWithText(id, mid, t.withdrawMenu, withdrawKeyboard());
     }
 
-    // CREATE REQUEST
     if (data.startsWith('w_')) {
       const amount = parseInt(data.split('_')[1], 10);
 
@@ -834,7 +869,6 @@ bot.on('callback_query', async (q) => {
       );
     }
 
-    // MY REQUESTS
     if (data === 'my') {
       const list = await getRequests(id);
 
@@ -851,7 +885,6 @@ bot.on('callback_query', async (q) => {
       return replaceWithText(id, mid, text.trim(), backKeyboard());
     }
 
-    // LEADERBOARD
     if (data === 'top') {
       const top = await redis.zrange('leaderboard', 0, 9, { rev: true });
 
@@ -880,7 +913,6 @@ bot.on('callback_query', async (q) => {
       return replaceWithText(id, mid, text.trim(), backKeyboard());
     }
 
-    // LANGUAGE MENU
     if (data === 'lang') {
       await safeDelete(id, mid);
       return sendTextCard(id, '🌍 Select language', langKeyboard());
@@ -892,7 +924,6 @@ bot.on('callback_query', async (q) => {
       return replaceWithMenu(id, mid, u);
     }
 
-    // MENU
     if (data === 'menu') {
       return replaceWithMenu(id, mid, u);
     }
