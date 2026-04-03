@@ -18,18 +18,9 @@ const ADMIN_ID = process.env.ADMIN_ID || '';
 const BOT_USERNAME = process.env.BOT_USERNAME || '';
 const PORT = process.env.PORT || 3000;
 
-/*
-  Menu photo.
-  Direct image URL required.
-  You can override it with MENU_PHOTO_URL env var.
-*/
 const DEFAULT_MENU_PHOTO_URL = 'https://i.ibb.co/JSLjw7m/B8-D80-FDD-AB82-43-A0-8272-9461-CB1-D932-A.png';
 const MENU_PHOTO_URL = process.env.MENU_PHOTO_URL || DEFAULT_MENU_PHOTO_URL;
 
-/*
-  Chat link button.
-  You can override it with CHAT_URL env var.
-*/
 const DEFAULT_CHAT_URL = 'https://t.me/Jantistar_chat';
 const CHAT_URL = process.env.CHAT_URL || DEFAULT_CHAT_URL;
 
@@ -106,14 +97,12 @@ function getTaskIndex(u) {
 function currentTask(u) {
   const idx = getTaskIndex(u);
 
-  // First: next pending task from the current cursor
   for (let i = idx; i < TASKS.length; i++) {
     const task = TASKS[i];
     const st = taskState(u, task.id);
     if (st === 'pending') return task;
   }
 
-  // Then: revisit skipped tasks once all pending tasks are done
   for (let i = 0; i < TASKS.length; i++) {
     const task = TASKS[i];
     const st = taskState(u, task.id);
@@ -130,11 +119,9 @@ function isTasksFinished(u) {
 function markTaskSkipped(u, task) {
   if (!u.task_states) u.task_states = {};
   const key = String(task.id);
-
   if (taskState(u, task.id) !== 'done') {
     u.task_states[key] = 'skipped';
   }
-
   return u;
 }
 
@@ -163,7 +150,6 @@ function getTaskStartTime(u, taskId) {
   if (!u.task_started_at_by_id || typeof u.task_started_at_by_id !== 'object') {
     u.task_started_at_by_id = {};
   }
-
   return Number(u.task_started_at_by_id[String(taskId)] || 0);
 }
 
@@ -171,7 +157,6 @@ function setTaskStartTime(u, taskId, ts = Date.now()) {
   if (!u.task_started_at_by_id || typeof u.task_started_at_by_id !== 'object') {
     u.task_started_at_by_id = {};
   }
-
   u.task_started_at_by_id[String(taskId)] = ts;
   return u;
 }
@@ -180,7 +165,6 @@ function clearTaskStartTime(u, taskId) {
   if (!u.task_started_at_by_id || typeof u.task_started_at_by_id !== 'object') {
     u.task_started_at_by_id = {};
   }
-
   delete u.task_started_at_by_id[String(taskId)];
   return u;
 }
@@ -549,7 +533,6 @@ async function sendTaskScreen(chatId, u, prefix = '') {
     return sendTextCard(chatId, `${prefix}${taskScreenText(u)}`, backKeyboard());
   }
 
-  // Each task gets its own fresh 3-second timer when shown.
   setTaskStartTime(u, task.id, Date.now());
   u.task_active_task_id = task.id;
   await saveUser(chatId, u);
@@ -606,7 +589,7 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
       await saveUser(id, u);
     }
 
-    // One-time referral bonus only.
+    // Referral bonus only once, and only for brand-new users.
     if (ref && ref !== String(id) && !u.ref_rewarded && !u.referred_by) {
       const refUser = await getUser(ref);
       if (refUser) {
@@ -687,7 +670,7 @@ bot.on('callback_query', async (q) => {
       const activeId = Number.isInteger(u.task_active_task_id) ? u.task_active_task_id : 0;
       const startedAt = getTaskStartTime(u, task.id);
 
-      // Start timer for this task if it doesn't exist yet.
+      // If this task has never started, start its timer now.
       if (!startedAt || activeId !== task.id) {
         setTaskStartTime(u, task.id, Date.now());
         u.task_active_task_id = task.id;
