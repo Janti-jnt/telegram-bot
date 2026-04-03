@@ -153,6 +153,14 @@ function getTaskStartTime(u, taskId) {
   return Number(u.task_started_at_by_id[String(taskId)] || 0);
 }
 
+function setTaskStartTime(u, taskId, ts = Date.now()) {
+  if (!u.task_started_at_by_id || typeof u.task_started_at_by_id !== 'object') {
+    u.task_started_at_by_id = {};
+  }
+  u.task_started_at_by_id[String(taskId)] = ts;
+  return u;
+}
+
 function clearTaskStartTime(u, taskId) {
   if (!u.task_started_at_by_id || typeof u.task_started_at_by_id !== 'object') {
     u.task_started_at_by_id = {};
@@ -227,7 +235,7 @@ function taskKeyboardForUser(u) {
 
   return {
     inline_keyboard: [
-      [{ text: t.taskOpenUrl, url: task.url }],
+      [{ text: t.taskOpen, callback_data: 'task_open' }],
       [{ text: t.taskCheck, callback_data: 'task_check' }],
       [{ text: t.taskSkip, callback_data: 'task_skip' }],
       [{ text: t.taskBack, callback_data: 'menu' }],
@@ -379,9 +387,9 @@ const texts = {
     myEmpty: '❌ Henüz talep yok',
     topEmpty: '❌ Liste boş',
     refNote: '👥 Her arkadaş için +1.5⭐ (kişi başı sadece 1 kez)',
+
     taskTitle: 'Görev',
     taskOpen: '🚀 Botu Aç',
-    taskOpenUrl: '🚀 Botu Aç',
     taskCheck: '✅ Kontrol Et',
     taskSkip: '⏭ Görevi Geç',
     taskBack: '🔙 Geri',
@@ -421,9 +429,9 @@ const texts = {
     myEmpty: '❌ No requests yet',
     topEmpty: '❌ Leaderboard is empty',
     refNote: '👥 +1.5⭐ for each friend (only once per user)',
+
     taskTitle: 'Task',
     taskOpen: '🚀 Open Bot',
-    taskOpenUrl: '🚀 Open Bot',
     taskCheck: '✅ Check',
     taskSkip: '⏭ Skip',
     taskBack: '🔙 Back',
@@ -463,9 +471,9 @@ const texts = {
     myEmpty: '❌ Заявок пока нет',
     topEmpty: '❌ Топ пуст',
     refNote: '👥 +1.5⭐ за каждого друга (только 1 раз на пользователя)',
+
     taskTitle: 'Задание',
     taskOpen: '🚀 Открыть бот',
-    taskOpenUrl: '🚀 Открыть бот',
     taskCheck: '✅ Проверить',
     taskSkip: '⏭ Пропустить',
     taskBack: '🔙 Назад',
@@ -533,7 +541,7 @@ function taskKeyboardForUser(u) {
 
   return {
     inline_keyboard: [
-      [{ text: t.taskOpenUrl, url: task.url }],
+      [{ text: t.taskOpen, callback_data: 'task_open' }],
       [{ text: t.taskCheck, callback_data: 'task_check' }],
       [{ text: t.taskSkip, callback_data: 'task_skip' }],
       [{ text: t.taskBack, callback_data: 'menu' }],
@@ -666,10 +674,28 @@ bot.on('callback_query', async (q) => {
 
     const t = texts[u.lang] || texts.tr;
 
+    // Tasks entry
     if (data === 'tasks') {
       return replaceWithText(id, mid, taskScreenText(u), taskKeyboardForUser(u));
     }
 
+    // Open bot + start timer in one tap
+    if (data === 'task_open') {
+      const task = currentTask(u);
+      if (!task) {
+        return replaceWithText(id, mid, taskScreenText(u), backKeyboard());
+      }
+
+      setTaskStartTime(u, task.id, Date.now());
+      u.task_active_task_id = task.id;
+      await saveUser(id, u);
+
+      return bot.answerCallbackQuery(q.id, {
+        url: task.url,
+      });
+    }
+
+    // Task check
     if (data === 'task_check') {
       const task = currentTask(u);
       if (!task) {
@@ -715,6 +741,7 @@ bot.on('callback_query', async (q) => {
       return sendTaskScreen(id, u, `${t.taskComplete}\n+${TASK_REWARD}⭐\n\n`);
     }
 
+    // Task skip
     if (data === 'task_skip') {
       const task = currentTask(u);
       if (!task) {
@@ -739,6 +766,7 @@ bot.on('callback_query', async (q) => {
       return sendTaskScreen(id, u, `${t.taskSkipped}\n\n`);
     }
 
+    // PLAY
     if (data === 'play') {
       if (u.stars < SPIN_COST) {
         return replaceWithText(id, mid, t.noMoney, backKeyboard());
@@ -768,10 +796,12 @@ bot.on('callback_query', async (q) => {
       );
     }
 
+    // BALANCE
     if (data === 'balance') {
       return replaceWithText(id, mid, `⭐ ${u.stars}\n👥 ${u.refs}`, backKeyboard());
     }
 
+    // REF
     if (data === 'ref') {
       const link = BOT_USERNAME
         ? `https://t.me/${BOT_USERNAME}?start=${id}`
@@ -785,10 +815,12 @@ bot.on('callback_query', async (q) => {
       );
     }
 
+    // WITHDRAW MENU
     if (data === 'withdraw') {
       return replaceWithText(id, mid, t.withdrawMenu, withdrawKeyboard());
     }
 
+    // CREATE REQUEST
     if (data.startsWith('w_')) {
       const amount = parseInt(data.split('_')[1], 10);
 
@@ -832,6 +864,7 @@ bot.on('callback_query', async (q) => {
       );
     }
 
+    // MY REQUESTS
     if (data === 'my') {
       const list = await getRequests(id);
 
@@ -848,6 +881,7 @@ bot.on('callback_query', async (q) => {
       return replaceWithText(id, mid, text.trim(), backKeyboard());
     }
 
+    // LEADERBOARD
     if (data === 'top') {
       const top = await redis.zrange('leaderboard', 0, 9, { rev: true });
 
@@ -876,6 +910,7 @@ bot.on('callback_query', async (q) => {
       return replaceWithText(id, mid, text.trim(), backKeyboard());
     }
 
+    // LANGUAGE MENU
     if (data === 'lang') {
       await safeDelete(id, mid);
       return sendTextCard(id, '🌍 Select language', langKeyboard());
@@ -887,6 +922,7 @@ bot.on('callback_query', async (q) => {
       return replaceWithMenu(id, mid, u);
     }
 
+    // MENU
     if (data === 'menu') {
       return replaceWithMenu(id, mid, u);
     }
