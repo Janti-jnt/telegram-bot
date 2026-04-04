@@ -647,24 +647,6 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
 });
 
 // ======================================================
-// Reset tasks for testing
-// ======================================================
-bot.onText(/^\/reset_tasks$/i, async (msg) => {
-  try {
-    const id = msg.chat.id;
-    let u = await getUser(id);
-    if (!u) return;
-
-    resetTaskProgress(u);
-    await saveUser(id, u);
-
-    return sendMenuCard(id, u, '✅ Görevler sıfırlandı\n\n');
-  } catch (err) {
-    console.error('RESET TASKS ERROR:', err);
-  }
-});
-
-// ======================================================
 // Message handler
 // ======================================================
 bot.on('message', async (msg) => {
